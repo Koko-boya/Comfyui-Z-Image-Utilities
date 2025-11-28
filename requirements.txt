@@ -1,0 +1,8 @@
+torch>=2.0.0
+Pillow>=9.0.0
+numpy>=1.21.0
+transformers>=4.45.0
+accelerate>=0.25.0
+huggingface_hub>=0.20.0
+# Optional: bitsandbytes>=0.41.0 (for quantization)
+# Optional: flash-attn>=2.0.0 (for faster inference)
