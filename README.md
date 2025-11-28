@@ -1,92 +1,111 @@
 # ComfyUI-ZImage-Utilities
 
-**A comprehensive utility suite designed to elevate Z-Image generation quality through superior input processing and intelligent prompt engineering.**
+A collection of utility nodes for ComfyUI that enhance Z-Image generation quality through intelligent prompt optimization using free LLM APIs etc
 
-This project is not just a prompt enhancer—it is a collection of specialized nodes built to ensure your Z-Image workflows start with the highest quality data possible. By leveraging the "Logic Cage" methodology and the Qwen model via OpenRouter, these utilities transform vague ideas into precise, aesthetically optimized instructions that Z-Image models can understand perfectly.
+## What It Does
 
-## The Z-Image Philosophy
+Transforms simple prompts into detailed, precise visual descriptions using the **"Logic Cage"** methodology—a structured approach that preserves your intent while adding professional-grade aesthetic and compositional details.
 
-Quality in, quality out. Z-Image models thrive on specificity, visual clarity, and logical consistency. This utility suite provides the infrastructure to:
-1.  **Standardize Inputs**: Ensure every prompt follows a strict, high-quality format.
-2.  **Maximize Intelligence**: Use state-of-the-art LLMs to reason about and expand your concepts.
-3.  **Ensure Reliability**: Robust error handling and rate limiting keep your workflows running smoothly.
+**Example:**
+```
+Input: "a cat"
 
-## The Utility Nodes
+Output: "A domestic shorthair cat with orange and white fur sits on a wooden floor. 
+The cat has green eyes and is looking directly at the camera with an alert expression. 
+Soft natural light from a nearby window illuminates the scene from the left, creating 
+gentle shadows. The background shows a blurred living room interior with warm tones..."
+```
 
-### 1. Z-Image Prompt Enhancer ("The Logic Cage")
-The core engine of the suite. This node doesn't just "rewrite" prompts; it forces them through a rigorous logical structure (the "Logic Cage") to ensure:
--   **Fidelity**: The core intent is locked and preserved.
--   **Detail**: Aesthetic and realistic details are injected based on visual reasoning.
--   **Clarity**: Ambiguities are removed, and text elements are handled with precision.
+## Features
 
-**Key Features:**
--   **Bilingual Support**: Native handling of Chinese and English.
--   **Smart Cleaning**: Automatically strips "thinking" tags and markdown artifacts.
--   **Detailed Logging**: Full visibility into the enhancement process.
-
-### 2. Z-Image OpenRouter API Router
-The connectivity backbone. This node manages the connection to the intelligence source (OpenRouter), allowing you to:
--   **Switch Models**: Use any model on OpenRouter (default: `qwen/qwen3-235b-a22b:free`).
--   **Manage Costs**: Use free models or premium ones as needed.
--   **Centralize Config**: Configure your API key once and use it across your workflow.
-
-### 3. Z-Image Prompt Enhancer + CLIP
-The integration layer. This node combines the enhancement engine with CLIP encoding, streamlining your workflow by:
--   **Direct Conditioning**: Outputting ready-to-use conditioning for KSamplers.
--   **Reducing Clutter**: Eliminating the need for separate CLIP Text Encode nodes.
--   **Ensuring Compatibility**: seamlessly bridging text enhancement with image generation.
-
-## Features at a Glance
-
-| Feature | Description |
-| :--- | :--- |
-| **Reliability** | Strict error handling, smart rate limiting (respects `Retry-After`), and auto-retries. |
-| **Quality** | "Logic Cage" prompting ensures high-fidelity, aesthetically pleasing outputs. |
-| **Flexibility** | User-definable models, temperature control, and manual retry settings. |
-| **Transparency** | Detailed debug logs show exactly what the model is thinking and doing. |
-| **Cost-Effective** | Default configuration uses 100% FREE models via OpenRouter. |
+✅ **100% Free** - Uses OpenRouter's free tier models (Qwen by default)  
+✅ **Bilingual** - Auto-detects and handles Chinese/English prompts  
+✅ **Reliable** - Smart retry logic with exponential backoff  
+✅ **Transparent** - Detailed debug logs for every generation  
+✅ **CLIP Integration** - Direct conditioning output for streamlined workflows
 
 ## Installation
 
-1.  Clone this repository into your `ComfyUI/custom_nodes/` directory:
-    ```bash
-    cd ComfyUI/custom_nodes/
-    git clone https://github.com/yourusername/ComfyUI-ZImage-Utilities.git
-    ```
-2.  Restart ComfyUI.
+1. Clone into your ComfyUI custom nodes directory:
+   ```bash
+   cd ComfyUI/custom_nodes/
+   git clone https://github.com/yourusername/ComfyUI-ZImage-Utilities.git
+   ```
 
-## Configuration
+2. Restart ComfyUI
 
-1.  Get a free API key from [OpenRouter](https://openrouter.ai/keys).
-2.  Add the **Z-Image OpenRouter API Router** node to your workflow.
-3.  Enter your API key.
+3. Get a free API key from [OpenRouter](https://openrouter.ai/keys)
 
-## Usage Workflows
+## Nodes
 
-### Standard Enhancement
-*Best for general usage where you want to see the text output.*
+### Z-Image OpenRouter API Router
+Configure your API connection. Set once, use everywhere.
+
+**Parameters:**
+- `api_key` - Your OpenRouter API key
+- `model` - Model ID (default: `qwen/qwen3-235b-a22b:free`)
+
+---
+
+### Z-Image Prompt Enhancer
+Core enhancement node. Transforms prompts using the Logic Cage methodology.
+
+**Inputs:**
+- `qwen_api` - API config from Router node
+- `prompt` - Your input text
+- `output_language` - `auto`, `english`, or `chinese`
+- `temperature` - Creativity (0.1-1.5, default: 0.7)
+- `max_tokens` - Output length (256-8192, default: 2048)
+- `retry_count` - Retries on failure (0-10, default: 1)
+
+**Outputs:**
+- `enhanced_prompt` - The improved text
+- `debug_log` - Detailed generation info
+
+---
+
+### Z-Image Prompt Enhancer + CLIP
+Same as above, but directly outputs CLIP conditioning for KSamplers.
+
+**Additional Input:**
+- `clip` - CLIP model from checkpoint
+
+**Outputs:**
+- `conditioning` - Ready for KSampler
+- `enhanced_prompt` - The text
+- `debug_log` - Generation info
+
+## Usage
+
+### Basic Workflow
 ```
-[Z-Image OpenRouter API Router] 
-       |
-       v
-[Z-Image Prompt Enhancer] <-- [Primitive String (Your Prompt)]
-       |
-       v
-[CLIP Text Encode] --> [KSampler]
+[API Router] → [Prompt Enhancer] → [CLIP Text Encode] → [KSampler]
+                      ↑
+                [Your Prompt]
 ```
 
-### Integrated Pipeline
-*Best for streamlined, high-efficiency workflows.*
+### Streamlined Workflow
 ```
-[Checkpoint Loader] --> [Z-Image Prompt Enhancer + CLIP] --> [KSampler]
-                                   ^
-                                   |
-                     [Z-Image OpenRouter API Router]
+[Checkpoint] → [Prompt Enhancer + CLIP] → [KSampler]
+                          ↑
+                    [API Router]
 ```
+
+## The Logic Cage Methodology
+
+The enhancement process follows a strict logical sequence:
+
+1. **Lock Core Elements** - Subject, quantity, actions, colors, text are preserved
+2. **Generative Reasoning** - If needed, constructs a complete visualizable solution
+3. **Aesthetic Injection** - Adds composition, lighting, materials, color schemes
+4. **Text Precision** - Handles all text elements with exact quoting and placement
+
+This ensures outputs are faithful to your intent while being dramatically more detailed and visually specific.
 
 ## Credits
 
--   **Prompt Template**: Adapted from the [Z-Image Turbo Space](https://huggingface.co/spaces/Tongyi-MAI/Z-Image-Turbo/blob/main/pe.py).
+- **Prompt Template**: Adapted from [Z-Image Turbo Space](https://huggingface.co/spaces/Tongyi-MAI/Z-Image-Turbo/blob/main/pe.py)
+- **Author**: Kokoboy
 
 ## License
 
