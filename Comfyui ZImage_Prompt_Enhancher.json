@@ -1,0 +1,749 @@
+{
+  "id": "72802fa8-05ae-4b67-a9ce-511dda4a5a6e",
+  "revision": 0,
+  "last_node_id": 46,
+  "last_link_id": 43,
+  "nodes": [
+    {
+      "id": 9,
+      "type": "ModelSamplingAuraFlow",
+      "pos": [
+        823.1764200139964,
+        19.672351426779464
+      ],
+      "size": [
+        275.99172544873454,
+        58
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 8
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "slot_index": 0,
+          "links": [
+            11
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.75",
+        "Node name for S&R": "ModelSamplingAuraFlow",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.5.1",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        3
+      ],
+      "color": "#223",
+      "bgcolor": "#335"
+    },
+    {
+      "id": 11,
+      "type": "VAEDecode",
+      "pos": [
+        1620.283109069297,
+        359.8637191371197
+      ],
+      "size": [
+        140,
+        46
+      ],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "link": 9
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 10
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            15
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.75",
+        "Node name for S&R": "VAEDecode",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.5.1"
+        }
+      },
+      "widgets_values": [],
+      "color": "#233",
+      "bgcolor": "#355"
+    },
+    {
+      "id": 16,
+      "type": "SaveImage",
+      "pos": [
+        1855.597746662778,
+        -146.717234602013
+      ],
+      "size": [
+        999.7072970214842,
+        623.7282534042359
+      ],
+      "flags": {},
+      "order": 12,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 15
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.75",
+        "Node name for S&R": "SaveImage",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.5.1"
+        }
+      },
+      "widgets_values": [
+        "ZIMAGE\\ZIMAGE"
+      ],
+      "color": "#2a363b",
+      "bgcolor": "#3f5159"
+    },
+    {
+      "id": 15,
+      "type": "KSampler",
+      "pos": [
+        1554.1183819020605,
+        -98.6525178102007
+      ],
+      "size": [
+        270,
+        262
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 11
+        },
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 40
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": 13
+        },
+        {
+          "name": "latent_image",
+          "type": "LATENT",
+          "link": 14
+        }
+      ],
+      "outputs": [
+        {
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [
+            9
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.75",
+        "Node name for S&R": "KSampler",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.5.1"
+        }
+      },
+      "widgets_values": [
+        389664221299294,
+        "randomize",
+        10,
+        1,
+        "euler",
+        "simple",
+        1
+      ]
+    },
+    {
+      "id": 14,
+      "type": "EmptySD3LatentImage",
+      "pos": [
+        1555.063184517615,
+        203.46230491658895
+      ],
+      "size": [
+        270,
+        106
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [
+            14
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.75",
+        "Node name for S&R": "EmptySD3LatentImage",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.5.1"
+        }
+      },
+      "widgets_values": [
+        896,
+        1600,
+        1
+      ],
+      "color": "#323",
+      "bgcolor": "#535"
+    },
+    {
+      "id": 8,
+      "type": "CLIPTextEncode",
+      "pos": [
+        1135.6955212133503,
+        122.57812939905345
+      ],
+      "size": [
+        400,
+        200
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 7
+        }
+      ],
+      "outputs": [
+        {
+          "name": "CONDITIONING",
+          "type": "CONDITIONING",
+          "links": [
+            13
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.75",
+        "Node name for S&R": "CLIPTextEncode",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.5.1"
+        }
+      },
+      "widgets_values": [
+        ""
+      ],
+      "color": "#322",
+      "bgcolor": "#533"
+    },
+    {
+      "id": 41,
+      "type": "ShowText|pysssss",
+      "pos": [
+        496.37832007608307,
+        162.9692426190696
+      ],
+      "size": [
+        283.0646980966094,
+        254.10296356647632
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "text",
+          "type": "STRING",
+          "link": 42
+        }
+      ],
+      "outputs": [
+        {
+          "name": "STRING",
+          "shape": 6,
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-custom-scripts",
+        "ver": "1.2.5",
+        "Node name for S&R": "ShowText|pysssss"
+      },
+      "widgets_values": [
+        "============================================================\nZ-IMAGE UTILITY LOG\nTimestamp: 2025-11-28 18:04:45\n============================================================\n\n[INPUT SETTINGS]\nLanguage: en\nInput Prompt: Anime illustration of a futuristic convenience store clerk. She has pink twin-tails and is wearing a...\n\n[FULL PROMPT]\n--------------------\nYou are a visionary artist trapped in a logic cage. Your mind is full of poetry and distant lands, but your hands uncontrollably only want to transform the user's prompt into an ultimate visual description that is faithful to the original intent, rich in detail, aesthetically pleasing, and directly usable by text-to-image models. Any ambiguity or metaphor makes you uncomfortable.\n\nYour workflow strictly follows a logical sequence:\n\nFirst, you analyze and lock in the immutable core elements of the user's prompt: subject, quantity, action, state, and any specified IP names, colors, text, etc. These are the cornerstones you must absolutely preserve.\n\nNext, you determine if the prompt requires **\"Generative Reasoning\"**. When the user's request is not a direct scene description but requires conceiving a solution (such as answering \"what is\", \"designing\", or showing \"how to solve\"), you must first visualize a complete, concrete, and visualizable solution in your mind. This solution will become the basis for your subsequent description.\n\nThen, once the core scene is established (whether directly from the user or through your reasoning), you inject professional-grade aesthetic and realistic details. This includes defining composition, setting lighting and atmosphere, describing material textures, defining color schemes, and constructing a layered space.\n\nFinally, precise handling of all text elements is a crucial step. You must transcribe word-for-word all text that you wish to appear in the final image, and you must enclose this text content in English double quotes (\"\") as a clear generation instruction. If the image belongs to design types like posters, menus, or UIs, you need to fully describe all text content it contains and detail its font and layout. Similarly, if items like signs, road signs, or screens in the image contain text, you must also state their specific content and describe their position, size, and material. Furthermore, if you add text-bearing elements (such as charts, problem-solving steps, etc.) during your reasoning conception, all text within them must also follow the same detailed description and quoting rules. If there is no text to be generated in the scene, you devote all your energy to pure visual detail expansion.\n\nYour final description must be objective and concrete, strictly forbidding the use of metaphors or emotional rhetoric, and absolutely excluding meta-tags like \"8K\", \"masterpiece\" or drawing instructions.\n\nStrictly output ONLY the final modified prompt, do not output any other content.\n\nUser input prompt: Anime illustration of a futuristic convenience store clerk. She has pink twin-tails and is wearing a blue uniform. She is holding up a sign that clearly says \"WELCOME\" at the top and \"欢迎光临\" at the bottom. Neon city lights in the background, highly detailed reflection on the glass window, 8k resolution. \n\n--------------------\n\n[API REQUEST]\nModel: qwen/qwen3-235b-a22b:free\nTemperature: 0.7\nMax Tokens: 2048\nRetry Count: 5\nHTTP Error Body: {\"error\":{\"message\":\"Provider returned error\",\"code\":429,\"metadata\":{\"raw\":\"qwen/qwen3-235b-a22b:free is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumulate your rate limits: https://openrouter.ai/settings/integrations\",\"provider_name\":\"Venice\"}},\"user_id\":\"user_33JLayHKM4s83Bew8e9tqL4VsIB\"}\nAttempt 1 failed: HTTP 429. Retrying in 3.0s...\nHTTP Error Body: {\"error\":{\"message\":\"Provider returned error\",\"code\":429,\"metadata\":{\"raw\":\"qwen/qwen3-235b-a22b:free is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumulate your rate limits: https://openrouter.ai/settings/integrations\",\"provider_name\":\"Venice\"}},\"user_id\":\"user_33JLayHKM4s83Bew8e9tqL4VsIB\"}\nAttempt 2 failed: HTTP 429. Retrying in 6.0s...\nHTTP Error Body: {\"error\":{\"message\":\"Provider returned error\",\"code\":429,\"metadata\":{\"raw\":\"qwen/qwen3-235b-a22b:free is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumulate your rate limits: https://openrouter.ai/settings/integrations\",\"provider_name\":\"Venice\"}},\"user_id\":\"user_33JLayHKM4s83Bew8e9tqL4VsIB\"}\nAttempt 3 failed: HTTP 429. Retrying in 12.0s...\n\n[API RESPONSE]\nStructure keys: ['id', 'provider', 'model', 'object', 'created', 'choices', 'usage']\nContent received: 1345 chars\n\n[CLEANING]\nRaw response length: 1345 chars\n\n[FINAL OUTPUT]\nAnime illustration of a young female convenience store clerk standing behind a glass storefront window, positioned slightly left of center frame. She has bright pink hair tied in two high twin-tails with smooth, synthetic-looking strands, each tail secured by black ribbons. Her uniform consists of a fitted short-sleeved blue polyester blouse with a white Peter Pan collar, black shoulder epaulets, and a matching blue A-line skirt. She holds a rectangular acrylic sign at chest height with both hands, the sign featuring a thin cyan neon border. The top line of text reads \"WELCOME\" in bold sans-serif font, the bottom line reads \"欢迎光临\" in identical font size and style. Behind her, a dense neon cityscape glows with vertical holographic advertisements in magenta, electric blue, and gold, displaying distorted Japanese and English storefront names. The glass window shows realistic reflections: a fragmented mirror image of the clerk's upper body, overlapping streaks of raindrops, and warped reflections of passing hover-vehicle headlights. Soft fluorescent interior lighting illuminates her uniform's subtle fabric texture and hair highlights, contrasting with the cool neon ambiance outside. The scene uses a teal and orange complementary color scheme with layered depth from foreground raindrops to midground clerk to distant skyscrapers."
+      ]
+    },
+    {
+      "id": 13,
+      "type": "UNETLoader",
+      "pos": [
+        828.0586400702828,
+        -98.99822043919183
+      ],
+      "size": [
+        270,
+        82
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            8
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.75",
+        "Node name for S&R": "UNETLoader",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.5.1"
+        }
+      },
+      "widgets_values": [
+        "z-image-turbo-fp8-e4m3fn.safetensors",
+        "fp8_e4m3fn"
+      ],
+      "color": "#323",
+      "bgcolor": "#535"
+    },
+    {
+      "id": 12,
+      "type": "VAELoader",
+      "pos": [
+        828.6753738007703,
+        116.99139974751404
+      ],
+      "size": [
+        270,
+        58
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "VAE",
+          "type": "VAE",
+          "links": [
+            10
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.75",
+        "Node name for S&R": "VAELoader",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.5.1"
+        }
+      },
+      "widgets_values": [
+        "ae.safetensors"
+      ],
+      "color": "#322",
+      "bgcolor": "#533"
+    },
+    {
+      "id": 10,
+      "type": "CLIPLoader",
+      "pos": [
+        827.0999700776147,
+        213.99751849240945
+      ],
+      "size": [
+        270,
+        106
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "CLIP",
+          "type": "CLIP",
+          "links": [
+            7,
+            41
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.75",
+        "Node name for S&R": "CLIPLoader",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.5.1"
+        }
+      },
+      "widgets_values": [
+        "qwen_3_4b.safetensors",
+        "lumina2",
+        "default"
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 39,
+      "type": "ZImagePromptEnhancerWithCLIP",
+      "pos": [
+        1142.5139939924936,
+        -143.50676801499662
+      ],
+      "size": [
+        385.5281431057688,
+        224
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 41
+        },
+        {
+          "name": "qwen_api",
+          "type": "QWEN_API",
+          "link": 43
+        }
+      ],
+      "outputs": [
+        {
+          "name": "conditioning",
+          "type": "CONDITIONING",
+          "links": [
+            40
+          ]
+        },
+        {
+          "name": "enhanced_prompt",
+          "type": "STRING",
+          "links": [
+            39
+          ]
+        },
+        {
+          "name": "debug_log",
+          "type": "STRING",
+          "links": [
+            42
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "ZImagePromptEnhancerWithCLIP"
+      },
+      "widgets_values": [
+        "Anime illustration of a futuristic convenience store clerk. She has pink twin-tails and is wearing a blue uniform. She is holding up a sign that clearly says \"WELCOME\" at the top and \"欢迎光临\" at the bottom. Neon city lights in the background, highly detailed reflection on the glass window, 8k resolution. ",
+        "auto",
+        0.7,
+        2048,
+        5
+      ]
+    },
+    {
+      "id": 25,
+      "type": "ShowText|pysssss",
+      "pos": [
+        493.2422509873162,
+        -135.7788853228184
+      ],
+      "size": [
+        283.0646980966094,
+        254.10296356647632
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "text",
+          "type": "STRING",
+          "link": 39
+        }
+      ],
+      "outputs": [
+        {
+          "name": "STRING",
+          "shape": 6,
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-custom-scripts",
+        "ver": "1.2.5",
+        "Node name for S&R": "ShowText|pysssss"
+      },
+      "widgets_values": [
+        "Anime illustration of a young female convenience store clerk standing behind a glass storefront window, positioned slightly left of center frame. She has bright pink hair tied in two high twin-tails with smooth, synthetic-looking strands, each tail secured by black ribbons. Her uniform consists of a fitted short-sleeved blue polyester blouse with a white Peter Pan collar, black shoulder epaulets, and a matching blue A-line skirt. She holds a rectangular acrylic sign at chest height with both hands, the sign featuring a thin cyan neon border. The top line of text reads \"WELCOME\" in bold sans-serif font, the bottom line reads \"欢迎光临\" in identical font size and style. Behind her, a dense neon cityscape glows with vertical holographic advertisements in magenta, electric blue, and gold, displaying distorted Japanese and English storefront names. The glass window shows realistic reflections: a fragmented mirror image of the clerk's upper body, overlapping streaks of raindrops, and warped reflections of passing hover-vehicle headlights. Soft fluorescent interior lighting illuminates her uniform's subtle fabric texture and hair highlights, contrasting with the cool neon ambiance outside. The scene uses a teal and orange complementary color scheme with layered depth from foreground raindrops to midground clerk to distant skyscrapers."
+      ]
+    },
+    {
+      "id": 42,
+      "type": "ZImageAPIConfig",
+      "pos": [
+        824.2697439830632,
+        377.97217476808913
+      ],
+      "size": [
+        277.27890625,
+        82
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "qwen_api",
+          "type": "QWEN_API",
+          "links": [
+            43
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "ZImageAPIConfig"
+      },
+      "widgets_values": [
+        "",
+        "qwen/qwen3-235b-a22b:free"
+      ]
+    }
+  ],
+  "links": [
+    [
+      7,
+      10,
+      0,
+      8,
+      0,
+      "CLIP"
+    ],
+    [
+      8,
+      13,
+      0,
+      9,
+      0,
+      "MODEL"
+    ],
+    [
+      9,
+      15,
+      0,
+      11,
+      0,
+      "LATENT"
+    ],
+    [
+      10,
+      12,
+      0,
+      11,
+      1,
+      "VAE"
+    ],
+    [
+      11,
+      9,
+      0,
+      15,
+      0,
+      "MODEL"
+    ],
+    [
+      13,
+      8,
+      0,
+      15,
+      2,
+      "CONDITIONING"
+    ],
+    [
+      14,
+      14,
+      0,
+      15,
+      3,
+      "LATENT"
+    ],
+    [
+      15,
+      11,
+      0,
+      16,
+      0,
+      "IMAGE"
+    ],
+    [
+      39,
+      39,
+      1,
+      25,
+      0,
+      "STRING"
+    ],
+    [
+      40,
+      39,
+      0,
+      15,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      41,
+      10,
+      0,
+      39,
+      0,
+      "CLIP"
+    ],
+    [
+      42,
+      39,
+      2,
+      41,
+      0,
+      "STRING"
+    ],
+    [
+      43,
+      42,
+      0,
+      39,
+      1,
+      "QWEN_API"
+    ]
+  ],
+  "groups": [
+    {
+      "id": 2,
+      "title": "Group",
+      "bounding": [
+        1116.2417654584153,
+        -173.30085500801272,
+        421.60778906912986,
+        522.1230800862273
+      ],
+      "color": "#3f789e",
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "id": 3,
+      "title": "Group",
+      "bounding": [
+        1544.1183819020607,
+        -172.25251781020066,
+        295.7534283028317,
+        590.4588505642643
+      ],
+      "color": "#3f789e",
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "id": 4,
+      "title": "Group",
+      "bounding": [
+        813.1764200139964,
+        -172.5982204391918,
+        295.99172544873454,
+        502.5957389316012
+      ],
+      "color": "#3f789e",
+      "font_size": 24,
+      "flags": {}
+    }
+  ],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.3452271214393178,
+      "offset": [
+        634.380786037005,
+        898.1231129237167
+      ]
+    },
+    "frontendVersion": "1.30.6",
+    "workflowRendererVersion": "LG",
+    "ue_links": [],
+    "links_added_by_ue": []
+  },
+  "version": 0.4
+}

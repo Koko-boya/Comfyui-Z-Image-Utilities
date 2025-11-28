@@ -2,6 +2,8 @@
 
 A collection of utility nodes for ComfyUI that enhance Z-Image generation quality through intelligent prompt optimization using free LLM APIs etc
 
+![ComfyUI-ZImage-Utilities](https://i.imgur.com/n2Jh9PD.png)
+
 ## What It Does
 
 Transforms simple prompts into detailed, precise visual descriptions using the **"Logic Cage"** methodology—a structured approach that preserves your intent while adding professional-grade aesthetic and compositional details.
@@ -106,7 +108,3 @@ This ensures outputs are faithful to your intent while being dramatically more d
 
 - **Prompt Template**: Adapted from [Z-Image Turbo Space](https://huggingface.co/spaces/Tongyi-MAI/Z-Image-Turbo/blob/main/pe.py)
 - **Author**: Kokoboy
-
-## License
-
-MIT
