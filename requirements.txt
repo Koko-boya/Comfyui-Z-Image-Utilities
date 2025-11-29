@@ -1,0 +1,14 @@
+# Base requirements (always needed)
+# No additional packages required for basic API functionality
+
+# Optional: For direct local model loading (Z_ImageDirectLocalConfig node)
+# Uncomment the lines below to enable direct local model loading:
+# torch>=2.0.0
+# transformers>=4.30.0
+# accelerate>=0.20.0
+# bitsandbytes>=0.41.0  # For quantization support
+# huggingface-hub>=0.16.0
+
+# Note: If you only use OpenRouter or Local API servers (Ollama, LM Studio, etc.),
+# you don't need to install these packages. They are only required for the
+# Z_ImageDirectLocalConfig node which loads models directly via transformers.

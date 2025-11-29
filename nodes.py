@@ -1,16 +1,17 @@
 """
 Z-Image Utility
 
-Supports both OpenRouter API and Local LLM servers.
+Supports multiple LLM backends: OpenRouter API, Local API servers, and Direct Local Models.
 
 Features:
-- Multiple Provider Support (OpenRouter / Local LLM)
+- Multiple Provider Support (OpenRouter / Local API / Direct Local Model)
 - User-definable Model ID
 - Manual Retry Count Control
 - Strict Error Handling
 - Smart Rate Limit Handling (Respects Retry-After headers)
 - Detailed Debug Logging Output
 - Local LLM Support (Ollama, LM Studio, vLLM, text-generation-webui, etc.)
+- Direct Model Loading (HuggingFace transformers with quantization support)
 """
 
 import os
@@ -22,6 +23,18 @@ from datetime import datetime
 from typing import Tuple, Dict, List, Optional
 import urllib.request
 import urllib.error
+from pathlib import Path
+
+# Optional imports for local model loading
+try:
+    import torch
+    from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
+    from huggingface_hub import snapshot_download
+    HAS_TRANSFORMERS = True
+except ImportError:
+    HAS_TRANSFORMERS = False
+    logger_temp = logging.getLogger("Z-ImageUtility")
+    logger_temp.warning("transformers not installed. Local model loading will not be available.")
 
 
 # ============================================================================
@@ -65,6 +78,249 @@ def setup_logger():
 
 
 logger = setup_logger()
+
+
+# ============================================================================
+# LOCAL MODEL MANAGER (Direct HuggingFace Model Loading)
+# ============================================================================
+
+class LocalModelManager:
+    """Manages local model loading using HuggingFace transformers."""
+
+    _loaded_models = {}  # Cache for loaded models
+
+    @staticmethod
+    def get_models_dir():
+        """Get the directory for storing local models."""
+        # Try to get ComfyUI models directory
+        try:
+            import folder_paths
+            base_dir = Path(folder_paths.models_dir)
+        except:
+            # Fallback to local directory
+            base_dir = Path(__file__).parent / "models"
+
+        models_dir = base_dir / "LLM" / "Z-Image"
+        models_dir.mkdir(parents=True, exist_ok=True)
+        return models_dir
+
+    @staticmethod
+    def ensure_model(repo_id: str, quantization: str = "none") -> Tuple[str, str]:
+        """
+        Download model if not present and return paths.
+
+        Args:
+            repo_id: HuggingFace repository ID (e.g., "Qwen/Qwen2.5-7B-Instruct")
+            quantization: Quantization mode ("none", "8bit", "4bit")
+
+        Returns:
+            Tuple of (model_path, cache_key)
+        """
+        if not HAS_TRANSFORMERS:
+            raise RuntimeError("transformers library not installed. Install with: pip install transformers torch accelerate bitsandbytes")
+
+        models_dir = LocalModelManager.get_models_dir()
+        model_name = repo_id.split("/")[-1]
+        model_path = models_dir / model_name
+
+        # Download if not present
+        if not model_path.exists():
+            logger.info(f"Downloading model {repo_id} to {model_path}")
+            logger.info("This may take a while depending on model size...")
+
+            try:
+                snapshot_download(
+                    repo_id=repo_id,
+                    local_dir=str(model_path),
+                    local_dir_use_symlinks=False,
+                    ignore_patterns=["*.md", ".git*", "*.gguf"],  # Skip unnecessary files
+                )
+                logger.info(f"Model downloaded successfully: {model_path}")
+            except Exception as e:
+                logger.error(f"Failed to download model: {e}")
+                raise RuntimeError(f"Failed to download model {repo_id}: {e}")
+        else:
+            logger.info(f"Model already exists at: {model_path}")
+
+        # Create cache key
+        cache_key = f"{repo_id}_{quantization}"
+        return str(model_path), cache_key
+
+    @staticmethod
+    def load_model(repo_id: str, quantization: str = "none", device: str = "auto"):
+        """
+        Load model and tokenizer with optional quantization.
+
+        Args:
+            repo_id: HuggingFace repository ID
+            quantization: "none", "8bit", or "4bit"
+            device: "auto", "cuda", or "cpu"
+
+        Returns:
+            Tuple of (model, tokenizer)
+        """
+        if not HAS_TRANSFORMERS:
+            raise RuntimeError("transformers library not installed")
+
+        model_path, cache_key = LocalModelManager.ensure_model(repo_id, quantization)
+
+        # Check cache
+        if cache_key in LocalModelManager._loaded_models:
+            logger.info(f"Using cached model: {cache_key}")
+            return LocalModelManager._loaded_models[cache_key]
+
+        logger.info(f"Loading model from {model_path} with quantization={quantization}")
+
+        # Prepare quantization config
+        model_kwargs = {}
+
+        if quantization == "4bit":
+            if not torch.cuda.is_available():
+                logger.warning("CUDA not available, falling back to FP16 on CPU")
+                quantization = "none"
+            else:
+                model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_compute_dtype=torch.float16,
+                    bnb_4bit_use_double_quant=True,
+                    bnb_4bit_quant_type="nf4",
+                )
+                model_kwargs["device_map"] = "auto"
+                logger.info("Using 4-bit quantization")
+
+        elif quantization == "8bit":
+            if not torch.cuda.is_available():
+                logger.warning("CUDA not available, falling back to FP16 on CPU")
+                quantization = "none"
+            else:
+                model_kwargs["load_in_8bit"] = True
+                model_kwargs["device_map"] = "auto"
+                logger.info("Using 8-bit quantization")
+
+        if quantization == "none":
+            if device == "auto":
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+            model_kwargs["torch_dtype"] = torch.float16 if device == "cuda" else torch.float32
+            logger.info(f"Using full precision on {device}")
+
+        try:
+            # Load tokenizer
+            tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+
+            # Load model
+            model = AutoModelForCausalLM.from_pretrained(
+                model_path,
+                trust_remote_code=True,
+                **model_kwargs
+            )
+
+            # Move to device if not using device_map
+            if "device_map" not in model_kwargs and quantization == "none":
+                model = model.to(device)
+
+            model.eval()
+
+            # Cache the model
+            LocalModelManager._loaded_models[cache_key] = (model, tokenizer)
+            logger.info(f"Model loaded successfully: {cache_key}")
+
+            return model, tokenizer
+
+        except Exception as e:
+            logger.error(f"Failed to load model: {e}")
+            raise RuntimeError(f"Failed to load model from {model_path}: {e}")
+
+    @staticmethod
+    def unload_model(repo_id: str, quantization: str = "none"):
+        """Unload a model from cache to free memory."""
+        cache_key = f"{repo_id}_{quantization}"
+        if cache_key in LocalModelManager._loaded_models:
+            del LocalModelManager._loaded_models[cache_key]
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            logger.info(f"Unloaded model: {cache_key}")
+
+
+class DirectLocalLLMClient:
+    """Client for directly loaded local models."""
+
+    def __init__(self, repo_id: str, quantization: str = "none", device: str = "auto"):
+        self.repo_id = repo_id
+        self.quantization = quantization
+        self.device = device
+        self.model = None
+        self.tokenizer = None
+
+    def ensure_loaded(self):
+        """Ensure model is loaded."""
+        if self.model is None or self.tokenizer is None:
+            self.model, self.tokenizer = LocalModelManager.load_model(
+                self.repo_id,
+                self.quantization,
+                self.device
+            )
+
+    def chat(self, messages: List[Dict], model: str, temperature: float = 0.7, max_tokens: int = 2048, retry_count: int = 3, debug_log: Optional[List[str]] = None) -> str:
+        """Generate response using loaded model."""
+
+        # Helper to log
+        def log(msg):
+            logger.debug(msg)
+            if debug_log is not None:
+                debug_log.append(msg)
+
+        log(f"\n[DIRECT LOCAL MODEL]")
+        log(f"Model: {self.repo_id}")
+        log(f"Quantization: {self.quantization}")
+        log(f"Temperature: {temperature}")
+        log(f"Max Tokens: {max_tokens}")
+
+        try:
+            # Ensure model is loaded
+            self.ensure_loaded()
+
+            # Format messages using chat template
+            text = self.tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True
+            )
+
+            # Tokenize
+            inputs = self.tokenizer(text, return_tensors="pt")
+
+            # Move to device
+            if self.quantization == "none":
+                device = self.model.device
+                inputs = {k: v.to(device) for k, v in inputs.items()}
+
+            # Generate
+            logger.info(f"Generating with local model: {self.repo_id}")
+
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=max_tokens,
+                    temperature=temperature,
+                    do_sample=temperature > 0,
+                    pad_token_id=self.tokenizer.eos_token_id,
+                )
+
+            # Decode
+            input_len = inputs["input_ids"].shape[1]
+            response = self.tokenizer.decode(
+                outputs[0][input_len:],
+                skip_special_tokens=True
+            )
+
+            log(f"\n[MODEL RESPONSE]")
+            log(f"Generated {len(response)} characters")
+
+            return response
+
+        except Exception as e:
+            log(f"Error during generation: {e}")
+            raise RuntimeError(f"Local model generation failed: {e}")
 
 
 # ============================================================================
@@ -499,6 +755,73 @@ class Z_ImageAPIConfig:
 
 
 # ============================================================================
+# NODE: DIRECT LOCAL MODEL CONFIG
+# ============================================================================
+
+class Z_ImageDirectLocalConfig:
+    """
+    Configuration node for directly loaded local models (no API server needed).
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "repo_id": ("STRING", {
+                    "default": "Qwen/Qwen2.5-7B-Instruct",
+                    "multiline": False,
+                    "placeholder": "HuggingFace repo (e.g., Qwen/Qwen2.5-7B-Instruct)",
+                    "tooltip": "HuggingFace repository ID - model will be auto-downloaded"
+                }),
+                "quantization": (["none", "8bit", "4bit"], {
+                    "default": "4bit",
+                    "tooltip": "Quantization reduces VRAM usage. 4bit recommended for most GPUs."
+                }),
+                "device": (["auto", "cuda", "cpu"], {
+                    "default": "auto",
+                    "tooltip": "Device to load model on. 'auto' selects CUDA if available."
+                }),
+            }
+        }
+
+    RETURN_TYPES = ("API_CONFIG",)
+    RETURN_NAMES = ("api_config",)
+    FUNCTION = "configure"
+    CATEGORY = "Z-Image"
+
+    def configure(self, repo_id: str, quantization: str, device: str):
+        """Create configuration for direct local model loading."""
+
+        if not HAS_TRANSFORMERS:
+            raise RuntimeError(
+                "Direct local model loading requires additional packages.\n"
+                "Install with: pip install transformers torch accelerate bitsandbytes"
+            )
+
+        clean_repo = repo_id.strip()
+        if not clean_repo:
+            raise ValueError("Repository ID cannot be empty!")
+
+        logger.info(f"Configuring Direct Local Model: {clean_repo}")
+        logger.info(f"Quantization: {quantization}, Device: {device}")
+
+        config = {
+            "provider": "direct_local",
+            "model": clean_repo,
+            "repo_id": clean_repo,
+            "quantization": quantization,
+            "device": device,
+            "client": DirectLocalLLMClient(
+                repo_id=clean_repo,
+                quantization=quantization,
+                device=device
+            ),
+        }
+
+        return (config,)
+
+
+# ============================================================================
 # NODE: PROMPT ENHANCER
 # ============================================================================
 
@@ -761,12 +1084,14 @@ class Z_ImagePromptEnhancerWithCLIP:
 
 NODE_CLASS_MAPPINGS = {
     "Z_ImageAPIConfig": Z_ImageAPIConfig,
+    "Z_ImageDirectLocalConfig": Z_ImageDirectLocalConfig,
     "Z_ImagePromptEnhancer": Z_ImagePromptEnhancer,
     "Z_ImagePromptEnhancerWithCLIP": Z_ImagePromptEnhancerWithCLIP,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "Z_ImageAPIConfig": "Z-Image LLM API Config (OpenRouter / Local)",
+    "Z_ImageAPIConfig": "Z-Image LLM API Config (OpenRouter / Local API)",
+    "Z_ImageDirectLocalConfig": "Z-Image Direct Local Model Config",
     "Z_ImagePromptEnhancer": "Z-Image Prompt Enhancer",
     "Z_ImagePromptEnhancerWithCLIP": "Z-Image Prompt Enhancer + CLIP",
 }

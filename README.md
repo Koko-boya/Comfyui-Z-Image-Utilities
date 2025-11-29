@@ -49,8 +49,12 @@ living room interior with warm tones.
 
 ### Features
 
-- **Flexible API options** — Use OpenRouter's free tier OR your own local LLM
-- **Local LLM support** — Works with Ollama, LM Studio, vLLM, text-generation-webui, and more
+- **3 Backend Options** — Choose what works best for you:
+  - **OpenRouter** (Cloud) — Free tier available, no setup required
+  - **Local API Server** — Ollama, LM Studio, vLLM, text-generation-webui, etc.
+  - **Direct Local Model** — Load models directly via HuggingFace transformers (NEW!)
+- **Auto Model Download** — Direct local models download automatically from HuggingFace
+- **Quantization Support** — 4-bit/8-bit quantization to run large models on consumer GPUs
 - **Bilingual** — Automatically detects and handles Chinese and English prompts
 - **Reliable** — Smart retry logic with exponential backoff and rate limit handling
 - **Transparent** — Debug output shows full API request/response details
@@ -60,12 +64,22 @@ living room interior with warm tones.
 
 **Option 1: OpenRouter (Cloud)**
 - Get a free API key from [OpenRouter](https://openrouter.ai/keys)
+- No installation required
 
-**Option 2: Local LLM (Self-hosted)**
+**Option 2: Local API Server**
 - Install a local LLM server (examples below)
 - Make sure it exposes an OpenAI-compatible API endpoint
 
-#### Local LLM Options
+**Option 3: Direct Local Model (NEW!)**
+- No server needed - models load directly in ComfyUI
+- Install dependencies:
+```bash
+pip install torch transformers accelerate bitsandbytes huggingface-hub
+```
+- Models auto-download from HuggingFace on first use
+- Supports quantization for lower VRAM usage
+
+#### Local API Server Options
 
 | Server | Default Port | Installation |
 |--------|--------------|--------------|
@@ -128,6 +142,40 @@ local_endpoint: http://localhost:1234/v1
 
 ---
 
+#### Z-Image Direct Local Model Config (NEW!)
+
+Load models directly from HuggingFace without needing a separate API server.
+
+| Parameter | Description | Example |
+|-----------|-------------|---------|
+| `repo_id` | HuggingFace repository ID | `Qwen/Qwen2.5-7B-Instruct` |
+| `quantization` | Memory optimization mode | `4bit` (recommended), `8bit`, or `none` |
+| `device` | Where to load the model | `auto` (uses CUDA if available) |
+
+**Output:** `api_config`
+
+**Example Configuration:**
+
+```
+repo_id: Qwen/Qwen2.5-7B-Instruct
+quantization: 4bit
+device: auto
+```
+
+**Recommended Models:**
+- `Qwen/Qwen2.5-7B-Instruct` (7B params, good balance)
+- `Qwen/Qwen2.5-14B-Instruct` (14B params, better quality)
+- `Qwen/Qwen2.5-3B-Instruct` (3B params, faster, lower quality)
+
+**Memory Requirements (approximate):**
+| Model Size | Full Precision | 8-bit | 4-bit |
+|------------|---------------|-------|-------|
+| 3B | ~12GB | ~6GB | ~3GB |
+| 7B | ~28GB | ~14GB | ~7GB |
+| 14B | ~56GB | ~28GB | ~14GB |
+
+---
+
 #### Z-Image Prompt Enhancer
 
 The core enhancement node.
@@ -171,11 +219,15 @@ Same as above, but outputs CLIP conditioning directly.
 
 | Issue | Solution |
 |-------|----------|
-| Empty response errors | **OpenRouter:** Verify API key and increase `retry_count`<br>**Local:** Check that your LLM server is running and the endpoint is correct |
+| Empty response errors | **OpenRouter:** Verify API key and increase `retry_count`<br>**Local API:** Check server is running and endpoint is correct<br>**Direct Local:** Check debug log for errors |
 | Rate limiting | The node respects `Retry-After` headers automatically; wait a few minutes if persistent |
-| Connection errors (local) | 1. Verify server is running (`ollama list` or check LM Studio)<br>2. Check endpoint URL matches server port<br>3. Ensure firewall allows local connections |
-| Model not found (local) | Make sure the model is downloaded (`ollama pull <model>` for Ollama) |
-| Unexpected output | Check `debug_log` for full API request/response details |
+| Connection errors (API) | 1. Verify server is running (`ollama list` or check LM Studio)<br>2. Check endpoint URL matches server port<br>3. Ensure firewall allows local connections |
+| Model not found (API) | Make sure the model is downloaded (`ollama pull <model>` for Ollama) |
+| Out of memory (Direct Local) | 1. Use `4bit` quantization instead of `8bit` or `none`<br>2. Try a smaller model (e.g., 3B instead of 7B)<br>3. Close other GPU applications |
+| Transformers not installed | Run: `pip install torch transformers accelerate bitsandbytes huggingface-hub` |
+| Model download failed | 1. Check internet connection<br>2. Verify HuggingFace repo ID is correct<br>3. Check disk space in ComfyUI models directory |
+| CUDA errors | 1. Update GPU drivers<br>2. Update PyTorch: `pip install --upgrade torch`<br>3. Try `device: cpu` for testing (slower) |
+| Unexpected output | Check `debug_log` for full request/response details |
 
 ---
 
