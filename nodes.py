@@ -347,7 +347,7 @@ class Z_ImagePromptEnhancer:
                     "placeholder": "Enter your prompt..."
                 }),
                 "output_language": (["auto", "english", "chinese"], {
-                    "default": "auto",
+                    "default": "chinese",
                     "tooltip": "auto: detect from input"
                 }),
                 "temperature": ("FLOAT", {
@@ -551,7 +551,7 @@ class Z_ImagePromptEnhancerWithCLIP:
                 "clip": ("CLIP",),
                 "api_config": ("API_CONFIG",),
                 "prompt": ("STRING", {"multiline": True, "default": ""}),
-                "output_language": (["auto", "english", "chinese"], {"default": "auto"}),
+                "output_language": (["auto", "english", "chinese"], {"default": "chinese"}),
                 "temperature": ("FLOAT", {"default": 0.7, "min": 0.1, "max": 1.5, "step": 0.05}),
                 "max_tokens": ("INT", {"default": 2048, "min": 256, "max": 8192, "step": 256}),
                 "retry_count": ("INT", {"default": 1, "min": 0, "max": 10, "step": 1}),
