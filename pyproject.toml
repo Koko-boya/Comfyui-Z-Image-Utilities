@@ -29,7 +29,7 @@ Documentation = "https://github.com/Koko-boya/Comfyui-Z-Image-Utilities/wiki"
 "Bug Tracker" = "https://github.com/Koko-boya/Comfyui-Z-Image-Utilities/issues"
 
 [tool.comfy]
-PublisherId = ""
+PublisherId = "kokoboy"
 DisplayName = "Comfyui-Z-Image-Utilities"
 Icon = ""
 includes = [] 
