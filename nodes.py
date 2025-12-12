@@ -95,9 +95,9 @@ DEFAULT_CONFIG = {
 
 # Tooltips for UI elements (following QwenVL pattern)
 TOOLTIPS = {
-    "provider": "Select API provider: openrouter (cloud), local (API server), or direct (HuggingFace model loading)",
+    "provider": "Select API provider: openrouter (cloud), google_ai_studio (Gemini), local (API server), or direct (HuggingFace model loading)",
     "model": "Model identifier. OpenRouter: provider/model-name | Local: model name from server | Direct: HuggingFace repo ID",
-    "api_key": "API key for OpenRouter. Get one at https://openrouter.ai/keys",
+    "api_key": "API key for OpenRouter or Google AI Studio. Get keys at https://openrouter.ai/keys or https://aistudio.google.com/app/apikey",
     "local_endpoint": "Local LLM server endpoint (Ollama: 11434, LM Studio: 1234, vLLM: 8000)",
     "quantization": "Model precision. 4-bit saves VRAM, 8-bit is balanced, FP16/None gives best quality",
     "temperature": "Sampling randomness. Lower (0.1-0.4) = focused, Higher (0.7+) = creative",
@@ -120,6 +120,7 @@ class Provider(str, Enum):
     OPENROUTER = "openrouter"
     LOCAL = "local"
     DIRECT = "direct"
+    GOOGLE_AI_STUDIO = "google_ai_studio"
 
 
 class Quantization(str, Enum):
@@ -735,8 +736,253 @@ class LocalLLMClient(BaseLLMClient):
 
 
 # ============================================================================
+# GOOGLE AI STUDIO CLIENT (Gemini API)
+# ============================================================================
+
+class GoogleAIStudioClient(BaseLLMClient):
+    """Client for Google AI Studio (Gemini) API."""
+    
+    BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+    
+    def __init__(self, api_key: str):
+        super().__init__()
+        self.api_key = api_key.strip()
+    
+    def _convert_messages_to_contents(
+        self,
+        messages: List[Dict[str, Any]]
+    ) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+        """
+        Convert OpenAI-style messages to Google's contents format.
+        
+        Returns:
+            Tuple of (contents, system_instruction)
+        """
+        contents = []
+        system_instruction = None
+        
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            
+            # Handle system messages as systemInstruction
+            if role == "system":
+                system_instruction = {
+                    "parts": [{"text": content}]
+                }
+                continue
+            
+            # Map assistant -> model for Google API
+            google_role = "model" if role == "assistant" else "user"
+            
+            # Handle content that might be a list (for vision models)
+            if isinstance(content, list):
+                parts = []
+                for item in content:
+                    if isinstance(item, dict):
+                        if item.get("type") == "text":
+                            parts.append({"text": item.get("text", "")})
+                        elif item.get("type") == "image_url":
+                            # Handle base64 image data
+                            image_url = item.get("image_url", {})
+                            url = image_url.get("url", "")
+                            if url.startswith("data:"):
+                                # Parse data URL: data:image/png;base64,xxxxx
+                                try:
+                                    header, b64_data = url.split(",", 1)
+                                    mime_type = header.split(":")[1].split(";")[0]
+                                    parts.append({
+                                        "inline_data": {
+                                            "mime_type": mime_type,
+                                            "data": b64_data
+                                        }
+                                    })
+                                except (ValueError, IndexError):
+                                    self._log(f"Failed to parse image data URL", "WARNING")
+                    else:
+                        parts.append({"text": str(item)})
+                contents.append({"role": google_role, "parts": parts})
+            else:
+                contents.append({
+                    "role": google_role,
+                    "parts": [{"text": str(content)}]
+                })
+        
+        return contents, system_instruction
+    
+    def chat(
+        self,
+        messages: List[Dict[str, Any]],
+        model: str,
+        temperature: float = 0.7,
+        max_tokens: int = 2048,
+        retry_count: int = 3,
+        timeout: int = 120,
+        **kwargs
+    ) -> str:
+        """Send chat completion request to Google AI Studio."""
+        self.clear_debug_log()
+        
+        self._log(f"Google AI Studio Request - Model: {model}", "INFO")
+        self._log(f"Temperature: {temperature}, Max Tokens: {max_tokens}, Retries: {retry_count}")
+        
+        if not self.api_key:
+            raise ValueError("API key is required! Get one at: https://aistudio.google.com/app/apikey")
+        
+        # Build endpoint URL
+        endpoint = f"{self.BASE_URL}/models/{model}:generateContent"
+        
+        # Convert messages to Google format
+        contents, system_instruction = self._convert_messages_to_contents(messages)
+        
+        if not contents:
+            raise ValueError("No valid content to send to the API")
+        
+        # Build request body
+        data = {
+            "contents": contents,
+            "generationConfig": {
+                "temperature": temperature,
+                "maxOutputTokens": max_tokens,
+            }
+        }
+        
+        # Add optional parameters
+        if "top_p" in kwargs:
+            data["generationConfig"]["topP"] = kwargs["top_p"]
+        if "top_k" in kwargs:
+            data["generationConfig"]["topK"] = kwargs["top_k"]
+        
+        # Add system instruction if present
+        if system_instruction:
+            data["systemInstruction"] = system_instruction
+        
+        headers = {
+            "Content-Type": "application/json",
+            "x-goog-api-key": self.api_key,
+        }
+        
+        for attempt in range(retry_count + 1):
+            try:
+                # Add API key as query parameter (Google's preferred method)
+                url_with_key = f"{endpoint}?key={self.api_key}"
+                
+                req = urllib.request.Request(
+                    url_with_key,
+                    data=json.dumps(data).encode('utf-8'),
+                    headers={"Content-Type": "application/json"},
+                    method='POST'
+                )
+                
+                with urllib.request.urlopen(req, timeout=timeout) as response:
+                    result = json.loads(response.read().decode('utf-8'))
+                
+                # Check for API error in response
+                if "error" in result:
+                    error_msg = result["error"].get("message", "Unknown API Error")
+                    self._log(f"API Error: {error_msg}", "ERROR")
+                    raise RuntimeError(f"Google AI Studio API error: {error_msg}")
+                
+                # Extract content from response
+                if "candidates" in result and len(result["candidates"]) > 0:
+                    candidate = result["candidates"][0]
+                    
+                    # Check finish reason
+                    finish_reason = candidate.get("finishReason", "")
+                    if finish_reason and finish_reason not in ["STOP", "MAX_TOKENS"]:
+                        self._log(f"Unusual finish reason: {finish_reason}", "WARNING")
+                    
+                    # Extract text from parts
+                    content_obj = candidate.get("content", {})
+                    parts = content_obj.get("parts", [])
+                    
+                    text_parts = []
+                    for part in parts:
+                        if "text" in part:
+                            text_parts.append(part["text"])
+                    
+                    content = "".join(text_parts)
+                    
+                    if not content or not content.strip():
+                        raise ValueError(f"API returned empty response for model '{model}'")
+                    
+                    self._log(f"Response received: {len(content)} characters", "INFO")
+                    
+                    # Log usage stats if available
+                    if "usageMetadata" in result:
+                        usage = result["usageMetadata"]
+                        self._log(f"Tokens - Prompt: {usage.get('promptTokenCount', 'N/A')}, "
+                                 f"Completion: {usage.get('candidatesTokenCount', 'N/A')}")
+                    
+                    return content
+                else:
+                    # Check if blocked by safety
+                    if "promptFeedback" in result:
+                        feedback = result["promptFeedback"]
+                        block_reason = feedback.get("blockReason", "")
+                        if block_reason:
+                            raise RuntimeError(f"Content blocked: {block_reason}")
+                    raise ValueError("Unexpected API response structure - no candidates")
+                    
+            except urllib.error.HTTPError as e:
+                error_content = self._parse_http_error(e)
+                
+                # Non-retryable client errors (except 429)
+                if 400 <= e.code < 500 and e.code != 429:
+                    self._log(f"HTTP {e.code} - Non-retryable error", "ERROR")
+                    raise RuntimeError(f"Google AI Studio Error {e.code}: {error_content}")
+                
+                # Out of retries
+                if attempt == retry_count:
+                    self._log(f"All retries exhausted. Final error: HTTP {e.code}", "ERROR")
+                    raise RuntimeError(f"Google AI Studio Error {e.code}: {error_content}")
+                
+                # Calculate wait time with exponential backoff
+                wait_time = 3 * (2 ** attempt)
+                if e.code == 429:
+                    retry_header = e.headers.get('Retry-After')
+                    if retry_header:
+                        try:
+                            wait_time = float(retry_header) + 1.0
+                        except ValueError:
+                            pass
+                
+                self._log(f"Attempt {attempt + 1} failed: HTTP {e.code}. Retrying in {wait_time:.1f}s...", "WARNING")
+                time.sleep(wait_time)
+                
+            except Exception as e:
+                if attempt == retry_count:
+                    self._log(f"Final attempt failed: {type(e).__name__}: {e}", "ERROR")
+                    raise
+                
+                wait_time = 3 * (2 ** attempt)
+                self._log(f"Attempt {attempt + 1} failed: {type(e).__name__}: {str(e)}. Retrying in {wait_time}s...", "WARNING")
+                time.sleep(wait_time)
+        
+        raise RuntimeError("Unexpected exit from retry loop")
+    
+    def _parse_http_error(self, e: urllib.error.HTTPError) -> str:
+        """Parse HTTP error response for detailed error message."""
+        try:
+            error_body = e.read().decode('utf-8')
+            self._log(f"HTTP Error Body: {error_body[:500]}")
+            
+            try:
+                err_json = json.loads(error_body)
+                if "error" in err_json:
+                    return err_json["error"].get("message", "Unknown Error")
+            except json.JSONDecodeError:
+                if len(error_body) < 300:
+                    return error_body
+        except Exception:
+            pass
+        return "Unknown error"
+
+
+# ============================================================================
 # DIRECT LOCAL MODEL CLIENT (HuggingFace)
 # ============================================================================
+
 
 class DirectLocalModelClient(BaseLLMClient):
     """Client for directly loaded HuggingFace models with caching."""
@@ -1474,7 +1720,7 @@ class Z_ImageAPIConfig:
             "optional": {
                 "api_key": ("STRING", {
                     "default": "",
-                    "placeholder": "sk-or-v1-xxxxx (OpenRouter only)",
+                    "placeholder": "API key (OpenRouter or Google AI Studio)",
                     "tooltip": TOOLTIPS["api_key"]
                 }),
                 "local_endpoint": ("STRING", {
@@ -1497,7 +1743,7 @@ class Z_ImageAPIConfig:
     RETURN_NAMES = ("config",)
     FUNCTION = "configure"
     CATEGORY = "Z-Image"
-    DESCRIPTION = "Configure LLM API connection. Supports OpenRouter, local servers, and direct HuggingFace model loading."
+    DESCRIPTION = "Configure LLM API connection. Supports OpenRouter, Google AI Studio (Gemini), local servers, and direct HuggingFace model loading."
     
     def configure(
         self,
@@ -1548,6 +1794,12 @@ class Z_ImageAPIConfig:
                 device=device
             )
             logger.info(f"Configured Direct Model: {clean_model} ({quantization})")
+        
+        elif provider_enum == Provider.GOOGLE_AI_STUDIO:
+            if not api_key.strip():
+                logger.warning("No API key provided for Google AI Studio!")
+            config["client"] = GoogleAIStudioClient(api_key=api_key.strip())
+            logger.info(f"Configured Google AI Studio: {clean_model}")
         
         return (config,)
 
