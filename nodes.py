@@ -332,8 +332,10 @@ def clear_gpu_memory() -> None:
     """Clear GPU memory cache."""
     gc.collect()
     if HAS_TRANSFORMERS and torch.cuda.is_available():
+        torch.cuda.synchronize()  # Wait for all CUDA operations to complete
         torch.cuda.empty_cache()
         torch.cuda.ipc_collect()
+        torch.cuda.reset_peak_memory_stats()  # Reset for monitoring
         logger.debug("GPU memory cache cleared")
 
 
@@ -1076,6 +1078,30 @@ class DirectLocalModelClient(BaseLLMClient):
                 )
         
         self._log(f"Generated {len(response)} characters", "INFO")
+        
+        # Explicit cleanup if not keeping loaded
+        if not keep_loaded:
+            self._log("Unloading model (keep_loaded=False)...", "INFO")
+            if self.model is not None:
+                try:
+                    self.model.cpu()
+                except Exception:
+                    pass
+                del self.model
+                self.model = None
+            if self.tokenizer is not None:
+                del self.tokenizer
+                self.tokenizer = None
+            if self.processor is not None:
+                del self.processor
+                self.processor = None
+            # Remove from class cache if present
+            cache_key = self._get_cache_key()
+            if cache_key in self._model_cache:
+                del self._model_cache[cache_key]
+            # Force memory release
+            clear_gpu_memory()
+        
         return response
     
     @classmethod
@@ -1083,14 +1109,34 @@ class DirectLocalModelClient(BaseLLMClient):
         """Unload a specific model from cache."""
         cache_key = f"{repo_id}_{quantization}_{device}"
         if cache_key in cls._model_cache:
-            del cls._model_cache[cache_key]
+            model, tokenizer_or_processor = cls._model_cache.pop(cache_key)
+            # Move model to CPU first to release CUDA references
+            if model is not None:
+                try:
+                    model.cpu()
+                except Exception:
+                    pass  # Some models may fail on .cpu(), continue cleanup
+                del model
+            if tokenizer_or_processor is not None:
+                del tokenizer_or_processor
             clear_gpu_memory()
             logger.info(f"Unloaded model: {cache_key}")
     
     @classmethod
     def unload_all_models(cls) -> None:
         """Unload all cached models."""
-        cls._model_cache.clear()
+        # Explicitly unload each model to properly free GPU memory
+        for cache_key in list(cls._model_cache.keys()):
+            model, tokenizer_or_processor = cls._model_cache.pop(cache_key)
+            if model is not None:
+                try:
+                    model.cpu()
+                except Exception:
+                    pass
+                del model
+            if tokenizer_or_processor is not None:
+                del tokenizer_or_processor
+        # Final cleanup
         clear_gpu_memory()
         logger.info("Unloaded all cached models")
 
