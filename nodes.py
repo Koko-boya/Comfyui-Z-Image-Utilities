@@ -870,12 +870,14 @@ class DirectLocalModelClient(BaseLLMClient):
         self,
         repo_id: str,
         quantization: str = "none",
-        device: str = "auto"
+        device: str = "auto",
+        llm_path: str = ""
     ):
         super().__init__()
         self.repo_id = repo_id.strip()
         self.quantization = Quantization(quantization) if isinstance(quantization, str) else quantization
         self.device = device
+        self.llm_path = llm_path.strip() if llm_path else ""
         self.model = None
         self.tokenizer = None
         self.processor = None
@@ -898,29 +900,45 @@ class DirectLocalModelClient(BaseLLMClient):
         return f"{self.repo_id}_{self.quantization.value}_{self.device}"
     
     def ensure_model_downloaded(self) -> Path:
-        """Download model if not present."""
+        """Download model if not present, or use custom path."""
         if not HAS_TRANSFORMERS:
             raise RuntimeError("transformers library required. Install: pip install transformers torch accelerate bitsandbytes")
         
+        # Priority 1: Custom llm_path
+        if self.llm_path:
+            custom_path = Path(self.llm_path) / self.repo_id
+            if custom_path.exists():
+                self._log(f"Using custom path: {custom_path}", "INFO")
+                return custom_path
+            # Try as direct path (repo_id could be full folder name)
+            direct_path = Path(self.llm_path)
+            if direct_path.exists() and (direct_path / "config.json").exists():
+                self._log(f"Using direct custom path: {direct_path}", "INFO")
+                return direct_path
+            raise RuntimeError(f"Model not found at custom path: {custom_path}")
+        
+        # Priority 2: Z-Image cache directory
         models_dir = self.get_models_dir()
         model_name = self.repo_id.split("/")[-1]
         model_path = models_dir / model_name
         
-        if not model_path.exists():
-            self._log(f"Downloading model {self.repo_id}...", "INFO")
-            try:
-                snapshot_download(
-                    repo_id=self.repo_id,
-                    local_dir=str(model_path),
-                    local_dir_use_symlinks=False,
-                    ignore_patterns=["*.md", ".git*", "*.gguf"],
-                )
-                self._log(f"Model downloaded to: {model_path}", "INFO")
-            except Exception as e:
-                self._log(f"Download failed: {e}", "ERROR")
-                raise RuntimeError(f"Failed to download model {self.repo_id}: {e}")
-        else:
+        if model_path.exists():
             self._log(f"Model found at: {model_path}")
+            return model_path
+        
+        # Priority 3: Download from HuggingFace
+        self._log(f"Downloading model {self.repo_id}...", "INFO")
+        try:
+            snapshot_download(
+                repo_id=self.repo_id,
+                local_dir=str(model_path),
+                local_dir_use_symlinks=False,
+                ignore_patterns=["*.md", ".git*", "*.gguf"],
+            )
+            self._log(f"Model downloaded to: {model_path}", "INFO")
+        except Exception as e:
+            self._log(f"Download failed: {e}", "ERROR")
+            raise RuntimeError(f"Failed to download model {self.repo_id}: {e}")
         
         return model_path
     
@@ -1651,6 +1669,11 @@ class Z_ImageAPIConfig:
                     "multiline": False,
                     "tooltip": TOOLTIPS["local_endpoint"]
                 }),
+                "llm_path": ("STRING", {
+                    "default": "",
+                    "placeholder": "C:/path/to/LLM/models (optional, for Direct provider)",
+                    "tooltip": "Custom path to local LLM models. If set, model name is treated as folder name. If empty, downloads from HuggingFace."
+                }),
                 "quantization": (Quantization.get_values(), {
                     "default": Quantization.Q4.value,
                     "tooltip": TOOLTIPS["quantization"]
@@ -1674,6 +1697,7 @@ class Z_ImageAPIConfig:
         model: str,
         api_key: str = "",
         local_endpoint: str = "http://localhost:11434/v1",
+        llm_path: str = "",
         quantization: str = "4bit",
         device: str = "auto"
     ) -> Tuple[Dict[str, Any]]:
@@ -1711,12 +1735,17 @@ class Z_ImageAPIConfig:
                 )
             config["quantization"] = quantization
             config["device"] = device
+            config["llm_path"] = llm_path.strip()
             config["client"] = DirectLocalModelClient(
                 repo_id=clean_model,
                 quantization=quantization,
-                device=device
+                device=device,
+                llm_path=llm_path.strip()
             )
-            logger.info(f"Configured Direct Model: {clean_model} ({quantization})")
+            if llm_path.strip():
+                logger.info(f"Configured Direct Model: {clean_model} from {llm_path}")
+            else:
+                logger.info(f"Configured Direct Model: {clean_model} ({quantization})")
         
         return (config,)
 
