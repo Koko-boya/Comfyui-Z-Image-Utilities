@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import base64
 import gc
+import hashlib
 import json
 import logging
 import os
@@ -30,6 +31,7 @@ import random
 import re
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -177,6 +179,21 @@ def setup_logger(name: str = "Z-ImageUtility", log_file: Optional[Path] = None) 
 
 
 logger = setup_logger(log_file=LOG_FILE)
+
+
+def emit_debug_report(title: str, report: str, level: int = logging.INFO) -> None:
+    """Write a multiline debug report to the configured logger."""
+    if not report or not report.strip():
+        return
+    logger.log(level, f"{title}\n{report}")
+
+
+def sanitize_remote_api_kwargs(kwargs: Dict[str, Any], excluded: Optional[set] = None) -> Dict[str, Any]:
+    """Drop internal-only kwargs before forwarding to remote APIs."""
+    excluded_keys = {"repeat_penalty", "keep_loaded"}
+    if excluded:
+        excluded_keys.update(excluded)
+    return {k: v for k, v in kwargs.items() if k not in excluded_keys and v is not None}
 
 
 # ============================================================================
@@ -374,6 +391,12 @@ def batch_tensors_to_base64(tensors: "torch.Tensor") -> List[str]:
         return []
     
     images_b64 = []
+    if isinstance(tensors, list):
+        for tensor in tensors:
+            if tensor is not None:
+                images_b64.append(tensor_to_base64(tensor))
+        return images_b64
+    
     for i in range(tensors.shape[0]):
         images_b64.append(tensor_to_base64(tensors[i]))
     return images_b64
@@ -486,6 +509,18 @@ def image_scale_aspect_ratio(image, target_width, target_height, upscale_method=
     return scaled.movedim(1, -1)
 
 
+def image_resize_exact(image, target_width, target_height, upscale_method="lanczos"):
+    """Resize an image tensor to the exact requested dimensions."""
+    if image is None:
+        return None
+    
+    samples = image.movedim(-1, 1)
+    target_width = max(8, (int(target_width) + 7) // 8 * 8)
+    target_height = max(8, (int(target_height) + 7) // 8 * 8)
+    resized = comfy.utils.common_upscale(samples, target_width, target_height, upscale_method, "disabled")
+    return resized.movedim(1, -1)
+
+
 def cleanGPUUsedForce():
     """Force clean GPU memory."""
     if torch.cuda.is_available():
@@ -572,8 +607,8 @@ class BaseLLMClient:
         self,
         messages: List[Dict[str, Any]],
         model: str,
-        temperature: float = 0.7,
-        max_tokens: int = 2048,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
         retry_count: int = 3,
         **kwargs
     ) -> str:
@@ -598,8 +633,8 @@ class OpenRouterClient(BaseLLMClient):
         self,
         messages: List[Dict[str, Any]],
         model: str,
-        temperature: float = 0.7,
-        max_tokens: int = 2048,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
         retry_count: int = 3,
         timeout: int = 120,
         **kwargs
@@ -608,7 +643,11 @@ class OpenRouterClient(BaseLLMClient):
         self.clear_debug_log()
         
         self._log(f"OpenRouter Request - Model: {model}", "INFO")
-        self._log(f"Temperature: {temperature}, Max Tokens: {max_tokens}, Retries: {retry_count}")
+        self._log(
+            f"Temperature: {temperature if temperature is not None else 'API default'}, "
+            f"Max Tokens: {max_tokens if max_tokens is not None else 'API default'}, "
+            f"Retries: {retry_count}"
+        )
         
         if not self.api_key:
             raise ValueError("API key is required! Get one at: https://openrouter.ai/keys")
@@ -623,14 +662,16 @@ class OpenRouterClient(BaseLLMClient):
         data = {
             "model": model,
             "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
         }
+        if temperature is not None:
+            data["temperature"] = temperature
+        if max_tokens is not None:
+            data["max_tokens"] = max_tokens
         
         # Add optional parameters (top_p, top_k, seed, etc.)
         # OpenRouter passes these through to the underlying model
         # Map repeat_penalty to repetition_penalty (standard name)
-        filtered_kwargs = {k: v for k, v in kwargs.items() if k != "repeat_penalty"}
+        filtered_kwargs = sanitize_remote_api_kwargs(kwargs)
         data.update(filtered_kwargs)
         
         if "repeat_penalty" in kwargs:
@@ -768,13 +809,19 @@ class LocalLLMClient(BaseLLMClient):
                 endpoint = f"{endpoint}/v1/chat/completions"
         
         return endpoint
+
+    def _supports_keep_alive(self) -> bool:
+        """Ollama supports keep_alive on its OpenAI-compatible endpoint."""
+        parsed = urllib.parse.urlparse(self.endpoint)
+        hostname = (parsed.hostname or "").lower()
+        return parsed.port == 11434 or "ollama" in hostname
     
     def chat(
         self,
         messages: List[Dict[str, Any]],
         model: str,
-        temperature: float = 0.7,
-        max_tokens: int = 2048,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
         retry_count: int = 3,
         timeout: int = 120,
         **kwargs
@@ -783,22 +830,28 @@ class LocalLLMClient(BaseLLMClient):
         self.clear_debug_log()
         
         self._log(f"Local LLM Request - Endpoint: {self.endpoint}", "INFO")
-        self._log(f"Model: {model}, Temperature: {temperature}, Max Tokens: {max_tokens}")
+        self._log(
+            f"Model: {model}, Temperature: {temperature if temperature is not None else 'API default'}, "
+            f"Max Tokens: {max_tokens if max_tokens is not None else 'API default'}"
+        )
         
         headers = {"Content-Type": "application/json"}
         
         data = {
             "model": model,
             "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "keep_alive": "30m",  # Keep model loaded for 30 minutes
         }
+        if temperature is not None:
+            data["temperature"] = temperature
+        if max_tokens is not None:
+            data["max_tokens"] = max_tokens
+        if self._supports_keep_alive():
+            data["keep_alive"] = "30m"
         
         # Add optional parameters
         # Pass through all options (seed, top_k, etc.)
         # Map repeat_penalty to repetition_penalty (standard name)
-        filtered_kwargs = {k: v for k, v in kwargs.items() if k != "repeat_penalty"}
+        filtered_kwargs = sanitize_remote_api_kwargs(kwargs)
         data.update(filtered_kwargs)
         
         if "repeat_penalty" in kwargs:
@@ -884,6 +937,8 @@ class DirectLocalModelClient(BaseLLMClient):
         self.tokenizer = None
         self.processor = None
         self.is_vl_model = False
+        self.model_type = ""
+        self.architectures: List[str] = []
     
     @staticmethod
     def get_models_dir() -> Path:
@@ -899,7 +954,69 @@ class DirectLocalModelClient(BaseLLMClient):
     
     def _get_cache_key(self) -> str:
         """Generate cache key for this model configuration."""
-        return f"{self.repo_id}_{self.quantization.value}_{self.device}"
+        if self.llm_path:
+            normalized_source = os.path.normcase(os.path.abspath(self.llm_path))
+        else:
+            normalized_source = "__auto_download__"
+        source_hash = hashlib.sha1(normalized_source.encode("utf-8")).hexdigest()[:12]
+        fallback_mode = "fallback" if self.auto_download_fallback else "strict"
+        return f"{self.repo_id}_{self.quantization.value}_{self.device}_{fallback_mode}_{source_hash}"
+
+    @staticmethod
+    def _supports_bfloat16() -> bool:
+        """Return True when CUDA BF16 is available on this runtime."""
+        if not torch.cuda.is_available():
+            return False
+        is_bf16_supported = getattr(torch.cuda, "is_bf16_supported", None)
+        if not callable(is_bf16_supported):
+            return False
+        try:
+            return bool(is_bf16_supported())
+        except Exception:
+            return False
+
+    @staticmethod
+    def _is_multimodal_config(model_type: str, architectures: List[str], config: Dict[str, Any]) -> bool:
+        """Detect multimodal/chat-processor models that need AutoProcessor + conditional generation."""
+        model_type = (model_type or "").lower()
+        arch_text = " ".join(architectures).lower()
+
+        if any(token in arch_text for token in [
+            "vision",
+            "imagetexttotext",
+            "qwen2vl",
+            "qwen3vl",
+            "gemma3",
+            "llava",
+            "paligemma",
+            "idefics",
+            "mllama",
+        ]):
+            return True
+
+        if any(token in model_type for token in [
+            "vl",
+            "vision",
+            "gemma3",
+            "paligemma",
+            "idefics",
+            "mllama",
+            "llava",
+        ]):
+            return True
+
+        return any(key in config for key in [
+            "vision_config",
+            "image_token_index",
+            "mm_tokens_per_image",
+            "vision_feature_select_strategy",
+        ])
+
+    def _preferred_cuda_dtype(self) -> "torch.dtype":
+        """Pick a stable CUDA dtype for the current model family."""
+        if self.model_type.startswith("gemma3") and self._supports_bfloat16():
+            return torch.bfloat16
+        return torch.float16
     
     def _validate_model_directory(self, model_path: Path) -> bool:
         """
@@ -1024,6 +1141,9 @@ class DirectLocalModelClient(BaseLLMClient):
             self._log(f"Using cached model: {cache_key}", "INFO")
             cached_item = self._model_cache[cache_key]
             self.model = cached_item[0]
+            model_config = getattr(self.model, "config", None)
+            self.model_type = str(getattr(model_config, "model_type", "") or "")
+            self.architectures = list(getattr(model_config, "architectures", []) or [])
             # Check if this is a VL model processor or a text tokenizer
             if hasattr(cached_item[1], 'image_processor'):
                 self.processor = cached_item[1]
@@ -1043,54 +1163,68 @@ class DirectLocalModelClient(BaseLLMClient):
             device = "cuda" if torch.cuda.is_available() else "cpu"
         else:
             device = self.device
-        
-        # Build model kwargs
-        # Force eager attention to avoid CUDA crashes with sage/flash attention on newer GPUs
-        model_kwargs = {"trust_remote_code": True, "use_safetensors": True, "attn_implementation": "eager"}
-        
-        if self.quantization == Quantization.Q4:
-            if not torch.cuda.is_available():
-                self._log("CUDA not available, falling back to FP16", "WARNING")
-            else:
-                model_kwargs["quantization_config"] = BitsAndBytesConfig(
-                    load_in_4bit=True,
-                    bnb_4bit_compute_dtype=torch.float16,
-                    bnb_4bit_use_double_quant=True,
-                    bnb_4bit_quant_type="nf4",
-                )
-                model_kwargs["device_map"] = "auto"
-                self._log("Using 4-bit quantization")
-                
-        elif self.quantization == Quantization.Q8:
-            if not torch.cuda.is_available():
-                self._log("CUDA not available, falling back to FP16", "WARNING")
-            else:
-                model_kwargs["load_in_8bit"] = True
-                model_kwargs["device_map"] = "auto"
-                self._log("Using 8-bit quantization")
-        
-        if "device_map" not in model_kwargs:
-            model_kwargs["torch_dtype"] = torch.float16 if device == "cuda" else torch.float32
-        
+
         try:
-            # Check if this is a Vision-Language model
+            # Inspect config first so we can pick the right model class and dtype.
             config_path = model_path / "config.json"
             self.is_vl_model = False
-            architectures = []
-            model_type = ""
+            self.model_type = ""
+            self.architectures = []
+            config = {}
             if config_path.exists():
                 try:
                     with open(config_path, 'r', encoding='utf-8') as f:
                         config = json.load(f)
-                        architectures = config.get("architectures", [])
-                        model_type = config.get("model_type", "")
-                        # Check for common VL architectures
-                        if any("Vision" in arch or "Qwen2VL" in arch or "Qwen3VL" in arch for arch in architectures) or \
-                           "vl" in model_type.lower() or "vision" in model_type.lower():
-                            self.is_vl_model = True
-                            self._log(f"Detected Vision-Language model: {model_type}", "INFO")
+                        self.architectures = list(config.get("architectures", []) or [])
+                        self.model_type = str(config.get("model_type", "") or "")
+                        self.is_vl_model = self._is_multimodal_config(
+                            self.model_type,
+                            self.architectures,
+                            config,
+                        )
+                        if self.is_vl_model:
+                            self._log(
+                                f"Detected Vision-Language model: {self.model_type or 'unknown'} "
+                                f"(architectures: {self.architectures})",
+                                "INFO"
+                            )
                 except (json.JSONDecodeError, IOError) as e:
                     self._log(f"Warning: Could not parse config.json: {e}", "WARNING")
+
+            preferred_cuda_dtype = self._preferred_cuda_dtype() if device == "cuda" else torch.float32
+
+            # Build model kwargs
+            # Force eager attention to avoid CUDA crashes with sage/flash attention on newer GPUs.
+            model_kwargs = {"trust_remote_code": True, "use_safetensors": True, "attn_implementation": "eager"}
+
+            if device == "cuda" and preferred_cuda_dtype == torch.bfloat16:
+                self._log("Using bfloat16 on CUDA for this model family", "INFO")
+
+            if self.quantization == Quantization.Q4:
+                if not torch.cuda.is_available():
+                    self._log("CUDA not available, falling back to FP16", "WARNING")
+                else:
+                    model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                        load_in_4bit=True,
+                        bnb_4bit_compute_dtype=preferred_cuda_dtype,
+                        bnb_4bit_use_double_quant=True,
+                        bnb_4bit_quant_type="nf4",
+                    )
+                    model_kwargs["device_map"] = "auto"
+                    model_kwargs["torch_dtype"] = preferred_cuda_dtype
+                    self._log(f"Using 4-bit quantization (compute dtype: {preferred_cuda_dtype})")
+
+            elif self.quantization == Quantization.Q8:
+                if not torch.cuda.is_available():
+                    self._log("CUDA not available, falling back to FP16", "WARNING")
+                else:
+                    model_kwargs["load_in_8bit"] = True
+                    model_kwargs["device_map"] = "auto"
+                    model_kwargs["torch_dtype"] = preferred_cuda_dtype
+                    self._log(f"Using 8-bit quantization (compute dtype: {preferred_cuda_dtype})")
+
+            if "device_map" not in model_kwargs:
+                model_kwargs["torch_dtype"] = preferred_cuda_dtype if device == "cuda" else torch.float32
 
             if self.is_vl_model:
                 # Load processor for VL models
@@ -1138,8 +1272,8 @@ class DirectLocalModelClient(BaseLLMClient):
         self,
         messages: List[Dict[str, Any]],
         model: str,
-        temperature: float = 0.7,
-        max_tokens: int = 2048,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
         retry_count: int = 3,
         keep_loaded: bool = True,
         **kwargs
@@ -1148,7 +1282,10 @@ class DirectLocalModelClient(BaseLLMClient):
         self.clear_debug_log()
         
         self._log(f"Direct Local Model - Repo: {self.repo_id}", "INFO")
-        self._log(f"Quantization: {self.quantization.value}, Temperature: {temperature}")
+        self._log(
+            f"Quantization: {self.quantization.value}, "
+            f"Temperature: {temperature if temperature is not None else 'Direct default'}"
+        )
         
         # Load model first to determine if it's a VL model (sets self.is_vl_model)
         self.load_model(keep_loaded=keep_loaded)
@@ -1183,10 +1320,14 @@ class DirectLocalModelClient(BaseLLMClient):
 
         # Prepare generation arguments
         gen_kwargs = {
-            "max_new_tokens": max_tokens,
-            "temperature": temperature if temperature > 0 else None,
-            "do_sample": temperature > 0,
+            "max_new_tokens": max_tokens if max_tokens is not None else DEFAULT_CONFIG["default_max_tokens"],
         }
+        if temperature is not None:
+            gen_kwargs["do_sample"] = temperature > 0
+            if temperature > 0:
+                gen_kwargs["temperature"] = temperature
+        else:
+            gen_kwargs["do_sample"] = False
         
         # Map and add optional parameters
         if "top_p" in kwargs:
@@ -1225,40 +1366,71 @@ class DirectLocalModelClient(BaseLLMClient):
                                 if part["type"] == "text":
                                     text_prompt += part["text"] + "\n"
                     
-                    # Prepare inputs using processor
-                    # Try to use processor's chat template if available for better formatting
-                    if hasattr(self.processor, 'apply_chat_template'):
+                    inputs = None
+
+                    # Text-only VL models such as Gemma 3 are more stable when the processor
+                    # tokenizes the chat template directly instead of routing through a tokenizer path.
+                    if not image_inputs and hasattr(self.processor, 'apply_chat_template'):
+                        processor_messages = []
+                        for msg in messages:
+                            content = msg.get("content", "")
+                            if isinstance(content, str):
+                                processor_messages.append({
+                                    "role": msg["role"],
+                                    "content": [{"type": "text", "text": content}],
+                                })
+                            else:
+                                processor_messages.append(msg)
                         try:
-                            # Use the processor's built-in chat template
-                            formatted_text = self.processor.apply_chat_template(
-                                messages,
-                                tokenize=False,
-                                add_generation_prompt=True
+                            inputs = self.processor.apply_chat_template(
+                                processor_messages,
+                                tokenize=True,
+                                return_dict=True,
+                                return_tensors="pt",
+                                add_generation_prompt=True,
                             )
-                            self._log("Using processor's apply_chat_template", "INFO")
+                            self._log("Using processor.apply_chat_template(tokenize=True) for VL generation", "INFO")
                         except Exception as e:
-                            # Fallback to manual formatting if template fails
-                            self._log(f"Chat template failed ({e}), using manual format", "WARNING")
+                            self._log(
+                                f"Tokenized processor chat template failed ({e}), falling back to text formatting",
+                                "WARNING"
+                            )
+
+                    if inputs is None:
+                        # Prepare inputs using processor
+                        # Try to use processor's chat template if available for better formatting
+                        if hasattr(self.processor, 'apply_chat_template'):
+                            try:
+                                # Use the processor's built-in chat template
+                                formatted_text = self.processor.apply_chat_template(
+                                    messages,
+                                    tokenize=False,
+                                    add_generation_prompt=True
+                                )
+                                self._log("Using processor's apply_chat_template", "INFO")
+                            except Exception as e:
+                                # Fallback to manual formatting if template fails
+                                self._log(f"Chat template failed ({e}), using manual format", "WARNING")
+                                formatted_text = f"User: {text_prompt}\nAssistant:"
+                        else:
+                            # No chat template available, use manual formatting
                             formatted_text = f"User: {text_prompt}\nAssistant:"
-                    else:
-                        # No chat template available, use manual formatting
-                        formatted_text = f"User: {text_prompt}\nAssistant:"
-                        self._log("No chat template available, using manual format", "INFO")
-                    
-                    # Process inputs with or without images
-                    if image_inputs:
-                        inputs = self.processor(
-                            text=[formatted_text],
-                            images=image_inputs,
-                            padding=True,
-                            return_tensors="pt"
-                        )
-                        self._log(f"Processed {len(image_inputs)} image(s) with text", "INFO")
-                    else:
-                        inputs = self.processor(
-                            text=[formatted_text],
-                            return_tensors="pt"
-                        )
+                            self._log("No chat template available, using manual format", "INFO")
+
+                        # Process inputs with or without images
+                        if image_inputs:
+                            inputs = self.processor(
+                                text=[formatted_text],
+                                images=image_inputs,
+                                padding=True,
+                                return_tensors="pt"
+                            )
+                            self._log(f"Processed {len(image_inputs)} image(s) with text", "INFO")
+                        else:
+                            inputs = self.processor(
+                                text=[formatted_text],
+                                return_tensors="pt"
+                            )
                     
                     # Move inputs to device
                     device = next(self.model.parameters()).device
@@ -1373,9 +1545,22 @@ class DirectLocalModelClient(BaseLLMClient):
         return response
     
     @classmethod
-    def unload_model(cls, repo_id: str, quantization: str = "none", device: str = "auto") -> None:
+    def unload_model(
+        cls,
+        repo_id: str,
+        quantization: str = "none",
+        device: str = "auto",
+        llm_path: str = "",
+        auto_download_fallback: bool = False
+    ) -> None:
         """Unload a specific model from cache."""
-        cache_key = f"{repo_id}_{quantization}_{device}"
+        if llm_path:
+            normalized_source = os.path.normcase(os.path.abspath(llm_path))
+        else:
+            normalized_source = "__auto_download__"
+        source_hash = hashlib.sha1(normalized_source.encode("utf-8")).hexdigest()[:12]
+        fallback_mode = "fallback" if auto_download_fallback else "strict"
+        cache_key = f"{repo_id}_{quantization}_{device}_{fallback_mode}_{source_hash}"
         if cache_key in cls._model_cache:
             model, tokenizer_or_processor = cls._model_cache.pop(cache_key)
             # Move model to CPU first to release CUDA references
@@ -1978,7 +2163,7 @@ class Z_ImagePromptEnhancer:
         utf8_sanitize: bool = False,
     ) -> Tuple[str, str]:
         """Enhance prompt using configured LLM."""
-        
+        debug_mode = bool(options.get("debug_mode")) if options else False
         debug_lines = []
         debug_lines.append("=" * 60)
         debug_lines.append("Z-IMAGE PROMPT ENHANCER")
@@ -1986,7 +2171,7 @@ class Z_ImagePromptEnhancer:
         debug_lines.append("=" * 60)
         
         try:
-            return self._enhance_internal(
+            result = self._enhance_internal(
                 config=config,
                 prompt=prompt,
                 prompt_template=prompt_template,
@@ -2002,9 +2187,14 @@ class Z_ImagePromptEnhancer:
                 debug_lines=debug_lines,
                 custom_system_prompt=custom_system_prompt
             )
+            if debug_mode:
+                emit_debug_report("Prompt enhancer debug report:", result[1], logging.INFO)
+            return result
         except Exception as e:
             error_msg = f"\nERROR: {type(e).__name__}: {str(e)}"
             debug_lines.append(error_msg)
+            if debug_mode:
+                emit_debug_report("Prompt enhancer debug report:", "\n".join(debug_lines), logging.ERROR)
             logger.error(error_msg)
             raise
     
@@ -2058,15 +2248,24 @@ class Z_ImagePromptEnhancer:
         debug_lines.append(f"Max Output Length: {max_output_length} (0=unlimited)")
         debug_lines.append(f"Options: {opts}")
         
-        # Session management - FIXED: Now shows proper session ID
-        effective_session_id = session_id if session_id.strip() else unique_id
-        
-        if reset_session:
-            cleared = clear_session(effective_session_id)
-            debug_lines.append(f"Session reset requested for '{effective_session_id}': {'cleared' if cleared else 'not found'}")
-        
-        session, is_new = get_or_create_session(effective_session_id, config['model'])
-        debug_lines.append(f"Session '{effective_session_id}': {'new' if is_new else 'existing'} ({len(session.messages)} messages)")
+        # Session management
+        # Blank session_id now means stateless execution. Persistent history only
+        # happens when the user explicitly opts into it with a session ID.
+        effective_session_id = session_id.strip()
+        session = ChatSession(model=config['model'])
+        is_new = True
+
+        if effective_session_id:
+            if reset_session:
+                cleared = clear_session(effective_session_id)
+                debug_lines.append(f"Session reset requested for '{effective_session_id}': {'cleared' if cleared else 'not found'}")
+
+            session, is_new = get_or_create_session(effective_session_id, config['model'])
+            debug_lines.append(f"Session '{effective_session_id}': {'new' if is_new else 'existing'} ({len(session.messages)} messages)")
+        else:
+            if reset_session:
+                debug_lines.append("Session reset requested, but no explicit session_id was provided")
+            debug_lines.append("Session: disabled (stateless mode)")
         
         # Build prompt with template
         template = PROMPT_TEMPLATE_ZH if lang == "zh" else PROMPT_TEMPLATE_EN if lang == "en" else custom_system_prompt
@@ -2085,12 +2284,13 @@ class Z_ImagePromptEnhancer:
         messages.append({"role": "system", "content": system_prompt})
         
         # Add session history if exists (for multi-turn)
-        if session.messages and not is_new:
+        if effective_session_id and session.messages and not is_new:
             messages.extend(session.get_messages())
             debug_lines.append(f"Added {len(session.messages)} messages from session history")
         
-        # Add minimal user trigger message
-        messages.append({"role": "user", "content": "Generate."})
+        # Always send the current prompt as the latest user message so multi-turn
+        # requests do not collapse into prior outputs.
+        messages.append({"role": "user", "content": prompt})
         
         # Handle vision models if image provided
         if image is not None and HAS_PIL:
@@ -2100,7 +2300,7 @@ class Z_ImagePromptEnhancer:
                 images_b64 = batch_tensors_to_base64(image)
                 if images_b64:
                     debug_lines.append(f"Encoded {len(images_b64)} image(s) to base64")
-                    content_parts = [{"type": "text", "text": "Generate based on the images."}]
+                    content_parts = [{"type": "text", "text": prompt}]
                     for idx, img_b64 in enumerate(images_b64):
                         content_parts.append({
                             "type": "image_url",
@@ -2114,12 +2314,12 @@ class Z_ImagePromptEnhancer:
                 logger.warning(f"Failed to encode images: {e}")
         
         # API parameters
-        temperature = opts.get("temperature", 0.7)
-        max_tokens = opts.get("max_tokens")  # Will be None if disabled
+        temperature = opts.get("temperature") if "temperature" in opts else None
+        max_tokens = opts.get("max_tokens") if "max_tokens" in opts else None
         
         debug_lines.append("\n[INFERENCE]")
-        debug_lines.append(f"Temperature: {temperature}")
-        debug_lines.append(f"Max Tokens: {max_tokens if max_tokens is not None else 'Not set (using API default)'}")
+        debug_lines.append(f"Temperature: {temperature if temperature is not None else 'Not set (using provider default)'}")
+        debug_lines.append(f"Max Tokens: {max_tokens if max_tokens is not None else 'Not set (using provider default)'}")
         
         # Make API call
         client = config["client"]
@@ -2127,10 +2327,12 @@ class Z_ImagePromptEnhancer:
         api_params = {
             "messages": messages,
             "model": config["model"],
-            "temperature": temperature,
             "retry_count": retry_count,
-            "keep_loaded": keep_model_loaded,
         }
+        if temperature is not None:
+            api_params["temperature"] = temperature
+        if config.get("provider") == Provider.DIRECT.value:
+            api_params["keep_loaded"] = keep_model_loaded
         
         # Only include max_tokens if it was enabled
         if max_tokens is not None:
@@ -2190,13 +2392,16 @@ class Z_ImagePromptEnhancer:
         
         logger.info(f"Enhancement successful. Length: {len(enhanced)}")
         
-        # Save conversation to session for multi-turn continuity
-        # Store original prompt (not system instruction) for cleaner history
-        session.add_message("user", prompt)
-        session.add_message("assistant", enhanced)
         debug_lines.append("\n[SESSION]")
-        debug_lines.append(f"Saved conversation to session '{effective_session_id}'")
-        debug_lines.append(f"Total messages in session: {len(session.messages)}")
+        if effective_session_id:
+            # Store the original prompt instead of the templated system prompt so
+            # explicit multi-turn sessions stay readable and compact.
+            session.add_message("user", prompt)
+            session.add_message("assistant", enhanced)
+            debug_lines.append(f"Saved conversation to session '{effective_session_id}'")
+            debug_lines.append(f"Total messages in session: {len(session.messages)}")
+        else:
+            debug_lines.append("Session persistence disabled")
         
         return (enhanced, "\n".join(debug_lines))
 
@@ -2347,6 +2552,9 @@ class Z_ImageIntegratedKSampler:
                 input_images.append(img)
                 debug_lines.append(f"Image {idx}: shape={img.shape}")
         
+        if generation_mode == "image_to_image" and not input_images:
+            raise ValueError("image_to_image mode requires at least one input image")
+        
         # Apply AuraFlow shift if specified
         if auraflow_shift > 0:
             debug_lines.append(f"Applying AuraFlow shift: {auraflow_shift}")
@@ -2389,7 +2597,7 @@ class Z_ImageIntegratedKSampler:
             # Prepare vision images for LLM if in I2I mode
             vision_images = None
             if generation_mode == "image_to_image" and input_images:
-                vision_images = torch.cat(input_images, dim=0)
+                vision_images = input_images
                 debug_lines.append(f"Sending {len(input_images)} images to LLM for enhancement")
             
             enhanced_prompt, enhance_debug = enhancer.enhance(
@@ -2445,10 +2653,10 @@ class Z_ImageIntegratedKSampler:
         # Create or use latent
         if latent is None:
             if generation_mode == "image_to_image" and input_images:
-                # Encode first image as starting latent
-                scaled_img = image_scale_aspect_ratio(input_images[0], width, height) if width > 0 and height > 0 else input_images[0]
+                # Encode first image as starting latent at the requested canvas size.
+                scaled_img = image_resize_exact(input_images[0], width, height) if width > 0 and height > 0 else input_images[0]
                 samples = vae.encode(scaled_img[:,:,:,:3])
-                debug_lines.append("Using encoded image as latent")
+                debug_lines.append(f"Using encoded image as latent at {scaled_img.shape[2]}x{scaled_img.shape[1]}")
             else:
                 # Empty latent for T2I
                 samples = torch.zeros([batch_size, 4, height // 8, width // 8], device=self.device)

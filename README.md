@@ -1,39 +1,44 @@
 # ComfyUI-Z-Image-Utilities
 
-A collection of utility nodes for ComfyUI designed specifically for the [Z-Image](https://github.com/Tongyi-MAI/Z-Image) model.
+A collection of utility nodes for ComfyUI designed for the [Z-Image](https://github.com/Tongyi-MAI/Z-Image) workflow, with LLM-powered prompt enhancement and an integrated sampling node.
 
 ![ComfyUI-Z-Image-Utilities](https://i.imgur.com/4pdoapv.png)
 
 ## Features
 
-- **3 Backend Options** — OpenRouter (cloud), Local API servers, or Direct HuggingFace model loading
-- **Vision Model Support** — Use vision-language models for image-aware prompt enhancement
-- **Integrated KSampler** — All-in-one node with prompt enhancement + sampling (AuraFlow, CFGNorm, batch generation)
-- **Session Management** — Multi-turn conversations with persistent chat history
-- **Smart Output Cleaning** — Automatically removes LLM artifacts, repetitions, and thinking tags
-- **Quantization Support** — 4-bit/8-bit quantization for running large models on consumer GPUs
-- **Bilingual** — Automatically detects and handles Chinese and English prompts
-- **Reliable** — Smart retry logic with exponential backoff and rate limit handling
-- **CLIP Integration** — Optional direct conditioning output for streamlined workflows
+- Three provider modes: OpenRouter, local OpenAI-compatible API servers, and direct Hugging Face model loading
+- Optional image-aware prompt enhancement for vision-capable models
+- Standalone prompt enhancer or all-in-one integrated KSampler workflow
+- Optional session history with manual `session_id` control; blank `session_id` runs are stateless
+- Direct-model quantization support with cache unloading tools
+- Detailed debugging through the `debug_log` output, console logs, and `z_image_debug.log`
 
 ---
 
 ## Installation
 
-1. Navigate to your ComfyUI custom nodes directory and clone the repository:
+1. Clone the repository into your ComfyUI custom nodes directory:
 
 ```bash
 cd ComfyUI/custom_nodes/
 git clone https://github.com/Koko-boya/ComfyUI-Z-Image-Utilities.git
 ```
 
-2. Install dependencies (required for Direct provider):
+2. Install the extra dependencies required only for the Direct provider:
 
 ```bash
-pip install torch transformers accelerate bitsandbytes huggingface-hub
+pip install bitsandbytes huggingface-hub
 ```
 
-3. Restart ComfyUI
+Optional for faster Hugging Face downloads:
+
+```bash
+pip install hf_transfer
+```
+
+ComfyUI already provides `torch`, `transformers`, and `accelerate` in a normal installation.
+
+3. Restart ComfyUI.
 
 ---
 
@@ -41,74 +46,77 @@ pip install torch transformers accelerate bitsandbytes huggingface-hub
 
 | Node | Description |
 |------|-------------|
-| **Z-Image API Config** | Configure API connection (OpenRouter, Local, or Direct) |
-| **Z-Image Options** | Advanced inference parameters (temperature, top_p, seed, etc.) |
-| **Z-Image Prompt Enhancer** | Core prompt enhancement node |
-| **Z-Image Integrated KSampler** | All-in-one: prompt enhancement + sampling with AuraFlow/CFGNorm |
-| **Z-Image Unload Models** | Free GPU memory by unloading cached models |
-| **Z-Image Clear Sessions** | Clear conversation history |
+| `Z-Image API Config` | Configure OpenRouter, local API, or direct Hugging Face model loading |
+| `Z-Image Options` | Optional inference settings with per-option enable toggles |
+| `Z-Image Prompt Enhancer` | Enhance prompts with text-only or vision-capable LLMs |
+| `Z-Image Integrated KSampler` | Prompt enhancement plus encoding, sampling, decoding, and optional auto-save |
+| `Z-Image Unload Models` | Unload cached direct models from memory |
+| `Z-Image Clear Sessions` | Clear saved chat sessions |
 
 ---
 
 ## Quick Start
 
-### Example Workflow
+Standalone enhancement workflow:
 
-```
-[Z-Image API Config] → [Z-Image Prompt Enhancer] → [CLIP Text Encode] → [KSampler]
-                                ↑
+```text
+[Z-Image API Config] -> [Z-Image Prompt Enhancer] -> [CLIP Text Encode] -> [KSampler]
+                                ^
                     [Z-Image Options] (optional)
 ```
 
-### All-in-One Workflow (Integrated KSampler)
+Integrated generation workflow:
 
+```text
+[Checkpoint Loader] -> [Z-Image Integrated KSampler] -> [Preview Image]
+         |                         ^
+         +--> model / clip / vae   |
+                         [Z-Image API Config]
 ```
-[Checkpoint Loader] → [Z-Image Integrated KSampler] → [Preview Image]
-                                ↑
-                    [Z-Image API Config]
-```
+
+If you use the integrated sampler in `image_to_image` mode, connect at least one image input.
 
 ---
 
 ## Provider Setup
 
-### Option 1: OpenRouter (Cloud) — Easiest
+### OpenRouter
 
-1. Get a free API key from [OpenRouter](https://openrouter.ai/keys)
-2. Configure the node:
-   - **Provider:** `openrouter`
-   - **Model:** `qwen/qwen3-235b-a22b:free` (or any OpenRouter model)
-   - **API Key:** Your OpenRouter API key
+- `provider`: `openrouter`
+- `model`: any compatible OpenRouter chat model
+- `api_key`: your OpenRouter API key
 
-### Option 2: Local API Server (Ollama, LM Studio, etc.)
+If you want to send an image into `Z-Image Prompt Enhancer`, use a vision-capable model. The current default model value in the node is `qwen/qwen3-235b-a22b:free`.
 
-1. Install and start your local LLM server
-2. Configure the node:
-   - **Provider:** `local`
-   - **Model:** Model name from your server (e.g., `qwen2.5:14b`)
-   - **Local Endpoint:** `http://localhost:11434/v1` (Ollama default)
+### Local API Server
 
-**Quick start with Ollama:**
-```bash
-# Install Ollama
-curl -fsSL https://ollama.ai/install.sh | sh
+The local provider expects an OpenAI-compatible `/v1/chat/completions` endpoint.
 
-# Pull a model
-ollama pull qwen2.5:14b
+- `provider`: `local`
+- `model`: model name exposed by your server
+- `local_endpoint`: server URL such as `http://localhost:11434/v1`
 
-# Server starts automatically at http://localhost:11434
-```
+Common endpoint examples:
 
-### Option 3: Direct HuggingFace Model Loading
+| Server | Endpoint |
+|--------|----------|
+| Ollama | `http://localhost:11434/v1` |
+| LM Studio | `http://localhost:1234/v1` |
+| vLLM | `http://localhost:8000/v1` |
+| text-generation-webui | `http://localhost:5000/v1` |
 
-Load models directly without a separate server:
+### Direct Hugging Face Loading
 
-1. Configure the node:
-   - **Provider:** `direct`
-   - **Model:** HuggingFace repo ID (e.g., `Qwen/Qwen2.5-7B-Instruct`)
-   - **Quantization:** `4bit` (recommended), `8bit`, or `none`
+- `provider`: `direct`
+- `model`: Hugging Face repo ID
+- `quantization`: `4bit`, `8bit`, or `none`
+- `device`: `auto`, `cuda`, `cpu`, or `mps`
+- `llm_path`: optional local model folder root
+- `auto_download_fallback`: if enabled, try `llm_path` first and download if not found
 
-Models download automatically on first use to `ComfyUI/models/LLM/Z-Image/`.
+Downloaded direct models are stored under `ComfyUI/models/LLM/Z-Image/`.
+
+If you want to use image input with the Direct provider, choose a vision-language model. Text-only models will reject image input.
 
 ---
 
@@ -116,191 +124,162 @@ Models download automatically on first use to `ComfyUI/models/LLM/Z-Image/`.
 
 ### Z-Image API Config
 
-Configure your LLM connection.
+Configures the LLM backend connection.
 
-| Parameter | Description | Example |
-|-----------|-------------|---------|
-| `provider` | Backend type | `openrouter`, `local`, `direct` |
-| `model` | Model identifier | `qwen/qwen3-235b-a22b:free` |
-| `api_key` | OpenRouter API key | `sk-or-v1-xxxxx` |
-| `local_endpoint` | Local server URL | `http://localhost:11434/v1` |
-| `llm_path` | Custom local model path (Direct only) | `C:/models/my-llm` |
-| `auto_download_fallback` | Auto-download if local path invalid (Direct only) | `true`, `false` |
-| `quantization` | Memory optimization (Direct only) | `4bit`, `8bit`, `none` |
-| `device` | Compute device (Direct only) | `auto`, `cuda`, `cpu`, `mps` |
+| Parameter | Notes |
+|-----------|-------|
+| `provider` | `openrouter`, `local`, or `direct` |
+| `model` | OpenRouter model ID, local server model name, or Hugging Face repo ID |
+| `api_key` | Used for OpenRouter |
+| `local_endpoint` | Used for the local provider |
+| `llm_path` | Optional manual model root for the Direct provider |
+| `auto_download_fallback` | Direct provider only |
+| `quantization` | Direct provider only |
+| `device` | Direct provider only |
 
-**Output:** `config`
-
----
+Output: `config`
 
 ### Z-Image Options
 
-Advanced inference parameters. Each option has an enable toggle.
+Provides optional inference settings. Values are only sent when their matching enable toggle is on.
 
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `temperature` | Sampling randomness (0.0–2.0) | 0.7 |
-| `top_p` | Nucleus sampling cutoff (0.0–1.0) | 0.9 |
-| `top_k` | Top-K sampling (0–100) | 40 |
-| `seed` | Random seed for reproducibility | Random |
-| `repeat_penalty` | Penalty for repeated tokens (0.5–2.0) | 1.1 |
-| `max_tokens` | Maximum tokens to generate (256–8192) | 2048 |
-| `debug_mode` | Enable detailed logging | False |
+| Toggle | Value |
+|--------|-------|
+| `enable_temperature` | `temperature` |
+| `enable_top_p` | `top_p` |
+| `enable_top_k` | `top_k` |
+| `enable_seed` | `seed` |
+| `enable_repeat_penalty` | `repeat_penalty` |
+| `enable_max_tokens` | `max_tokens` |
+| Always available | `debug_mode` |
 
-**Output:** `options`
+Notes:
 
----
+- If `enable_temperature` is off, the provider default temperature is used.
+- If `enable_max_tokens` is off, the provider default max token limit is used.
+- Support for `seed`, `top_k`, and similar settings depends on the backend model/provider.
+
+Output: `options`
 
 ### Z-Image Prompt Enhancer
 
-The core enhancement node.
+Enhances a text prompt into a longer image-generation prompt.
 
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `config` | Configuration from API Config node | — |
-| `prompt` | Your input text | — |
-| `prompt_template` | Template language | `auto`, `chinese`, `english`, `custom` |
-| `options` | Optional inference parameters | — |
-| `image` | Optional image for vision models | — |
-| `retry_count` | Retry attempts on failure (0–10) | 3 |
-| `max_output_length` | Max output characters (0=unlimited) | 6000 |
-| `session_id` | Session ID for multi-turn conversations | — |
-| `reset_session` | Clear conversation history | False |
-| `keep_model_loaded` | Cache model in memory | True |
-| `utf8_sanitize` | Convert to ASCII-safe characters | False |
-| `custom_system_prompt` | Your own system prompt (requires `{prompt}` placeholder) | — |
+| Parameter | Notes |
+|-----------|-------|
+| `config` | From `Z-Image API Config` |
+| `prompt` | Input prompt text |
+| `prompt_template` | `auto`, `chinese`, `english`, or `custom` |
+| `options` | Optional `ZIMAGE_OPTIONS` input |
+| `image` | Optional image input for vision-capable models |
+| `retry_count` | Retry attempts on API failure |
+| `max_output_length` | Character limit; `0` means unlimited |
+| `session_id` | Reuse the same value for persistent conversation history |
+| `reset_session` | Clears the named session before use |
+| `keep_model_loaded` | Direct provider only; keeps the loaded HF model cached |
+| `utf8_sanitize` | Replaces some Unicode punctuation with ASCII-safe characters |
+| `custom_system_prompt` | Required only when `prompt_template` is `custom`; must include `{prompt}` |
 
-> **Custom System Prompt:** Select `custom` in `prompt_template` and provide your own system prompt. Must include `{prompt}` as a placeholder for user input.
+Notes:
 
-**Outputs:** `enhanced_prompt`, `debug_log`
+- Blank `session_id` means stateless execution.
+- With `debug_mode` enabled, the full report is returned in `debug_log` and also written to logs.
 
----
+Outputs: `enhanced_prompt`, `debug_log`
 
 ### Z-Image Integrated KSampler
 
-All-in-one node combining LLM prompt enhancement with full KSampler capabilities.
+All-in-one node for prompt enhancement and image generation.
 
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `model` | Diffusion model | — |
-| `clip` | CLIP model | — |
-| `vae` | VAE model | — |
-| `config` | LLM configuration | — |
-| `positive_prompt` | Positive prompt (enhanced by LLM) | — |
-| `negative_prompt` | Negative prompt | — |
-| `generation_mode` | `text_to_image` or `image_to_image` | `text_to_image` |
-| `width` / `height` | Output dimensions | 1024 |
-| `seed` | Random seed | 0 |
-| `steps` | Sampling steps | 20 |
-| `cfg` | CFG scale | 7.0 |
-| `sampler_name` | Sampler algorithm | `euler` |
-| `scheduler` | Scheduler type | `normal` |
-| `denoise` | Denoise strength | 1.0 |
-| `enable_prompt_enhance` | Toggle LLM enhancement | True |
-| `auraflow_shift` | AuraFlow optimization (0 = disabled) | 0.0 |
-| `cfg_norm_strength` | CFGNorm strength (0 = disabled) | 0.0 |
-| `batch_size` | Number of images | 1 |
-| `auto_save_folder` | Auto-save path (empty = disabled) | — |
-| `enable_clean_gpu` | Clean GPU memory | False |
-| `instruction` | VLM instruction for I2I mode | — |
+Required inputs:
 
-**Outputs:** `images`, `latent`, `enhanced_prompt`, `debug_log`
+- `model`
+- `clip`
+- `vae`
+- `config`
+- `positive_prompt`
+- `negative_prompt`
+- `generation_mode`
+- `width`
+- `height`
+- `seed`
+- `steps`
+- `cfg`
+- `sampler_name`
+- `scheduler`
 
----
+Important optional inputs/settings:
+
+| Parameter | Notes |
+|-----------|-------|
+| `options` | Optional LLM options |
+| `image_1` to `image_4` | Optional images for vision enhancement and `image_to_image` mode |
+| `latent` | Optional latent override |
+| `prompt_template` | `auto`, `chinese`, `english`, or `custom` |
+| `enable_prompt_enhance` | If off, the prompt is used as-is |
+| `batch_size` | Number of images to generate |
+| `auraflow_shift` | Applies AuraFlow sampling shift when greater than `0` |
+| `cfg_norm_strength` | Applies CFGNorm when greater than `0` |
+| `enable_clean_gpu` | Clears GPU cache before and after sampling |
+| `enable_clean_ram` | Runs garbage collection after completion |
+| `auto_save_folder` | Empty disables auto-save; relative paths resolve inside ComfyUI output |
+| `output_prefix` | Filename prefix for auto-saved images |
+| `custom_system_prompt` | Used with `prompt_template = custom` |
+| `instruction` | Vision-language instruction text for `image_to_image` mode |
+| `denoise` | Standard KSampler denoise strength |
+
+Notes:
+
+- `image_to_image` mode requires at least one connected image.
+- The starting latent is prepared at the requested `width` and `height`.
+- This node always calls the prompt enhancer statelessly.
+
+Outputs: `images`, `latent`, `enhanced_prompt`, `debug_log`
 
 ### Z-Image Unload Models
 
-Free GPU memory by removing cached models.
+Unloads cached Direct-provider models.
 
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `unload_all` | Unload all cached models | True |
+| Parameter | Notes |
+|-----------|-------|
+| `unload_all` | When `true`, unloads all cached direct models |
+| `passthrough` | Optional passthrough input for graph chaining |
 
-**Output:** `status`
-
----
+Output: `status`
 
 ### Z-Image Clear Sessions
 
-Clear conversation history.
+Clears saved prompt-enhancer session history.
 
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `clear_all` | Clear all sessions | True |
-| `session_id` | Specific session to clear | — |
+| Parameter | Notes |
+|-----------|-------|
+| `clear_all` | Clears every saved session |
+| `session_id` | Clears one specific session when `clear_all` is `false` |
 
-**Output:** `status`
-
----
-
-## Recommended Models
-
-These models have been tested and work well for prompt enhancement:
-
-| Model | Type | Description |
-|-------|------|-------------|
-| [Goekdeniz-Guelmez/Josiefied-Qwen3-8B-abliterated-v1](https://huggingface.co/Goekdeniz-Guelmez/Josiefied-Qwen3-8B-abliterated-v1) | Local/Direct | **Recommended** — Works for both SFW and NSFW content. Available in GGUF and standard formats. |
-| [Qwen/Qwen3-8B](https://huggingface.co/Qwen/Qwen3-8B) | Local/Direct | Official Qwen model — SFW only |
-| `qwen/qwen3-235b-a22b:free` | OpenRouter | Free cloud option, high quality |
-
-**VRAM Requirements (approximate):**
-
-| Model Size | 4-bit | 8-bit | Full Precision |
-|------------|-------|-------|----------------|
-| 8B | ~6GB | ~10GB | ~16GB |
-
----
-
-## Example
-
-**Input:**
-```
-a cat
-```
-
-**Output:**
-```
-A domestic shorthair cat with orange and white fur sits on a wooden floor. 
-The cat has bright green eyes and is looking directly at the camera with 
-an alert expression. Soft natural light from a nearby window illuminates 
-the scene from the left, creating gentle shadows. The background shows a 
-blurred living room interior with warm earth tones. The cat's fur texture 
-is clearly visible with individual strands catching the light. Centered 
-composition with shallow depth of field.
-```
+Output: `status`
 
 ---
 
 ## Troubleshooting
 
-| Issue | Solution |
-|-------|----------|
-| **Empty response** | Increase `retry_count`, verify API key/endpoint |
-| **Rate limiting** | Node handles automatically; wait if persistent |
-| **Connection errors** | Check server is running, verify endpoint URL |
-| **Out of memory** | Use `4bit` quantization, smaller model, or unload other models |
-| **Model not found** | Verify HuggingFace repo ID or run `ollama pull <model>` |
-| **Thinking tags in output** | Update to latest version (automatic removal) |
-| **Repetitive output** | Enable `repeat_penalty` in Options node |
-| **Unexpected output** | Check `debug_log` output for details |
-
-### Common Endpoint URLs
-
-| Server | Default Endpoint |
-|--------|------------------|
-| Ollama | `http://localhost:11434/v1` |
-| LM Studio | `http://localhost:1234/v1` |
-| vLLM | `http://localhost:8000/v1` |
-| text-generation-webui | `http://localhost:5000/v1` |
+| Issue | What to check |
+|-------|---------------|
+| Empty or failed response | Verify API key, endpoint, model name, and `retry_count` |
+| Rate limits from OpenRouter | The node retries automatically, but free models can still hit upstream `429` limits |
+| Image input fails on Direct provider | Use a vision-language model instead of a text-only model |
+| Local provider errors | Make sure the server exposes an OpenAI-compatible `/v1` endpoint |
+| Out of memory | Use `4bit`, a smaller model, or unload cached direct models |
+| Repetitive output | Enable `repeat_penalty` in `Z-Image Options` |
+| Need deeper logs | Turn on `debug_mode` and inspect `debug_log` or `z_image_debug.log` |
 
 ---
 
 ## Credits
 
-- **System Prompt:** [Z-Image Turbo Space](https://huggingface.co/spaces/Tongyi-MAI/Z-Image-Turbo/blob/main/pe.py) by Tongyi-MAI
-- **Author:** [Koko-boya](https://github.com/Koko-boya)
+- System prompt source: [Z-Image Turbo Space](https://huggingface.co/spaces/Tongyi-MAI/Z-Image-Turbo/blob/main/pe.py)
+- Author: [Koko-boya](https://github.com/Koko-boya)
 
-### References
+References:
 
 - [comfyui-ollama](https://github.com/stavsap/comfyui-ollama)
 - [ComfyUI-QwenVL](https://github.com/1038lab/ComfyUI-QwenVL)
@@ -308,4 +287,4 @@ composition with shallow depth of field.
 
 ## License
 
-Apache License 2.0 — see [LICENSE](LICENSE) for details.
+Apache License 2.0. See [LICENSE](LICENSE).
